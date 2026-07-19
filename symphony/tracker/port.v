@@ -43,12 +43,14 @@ fn linear_from_config(config workflow.TrackerConfig) !LinearClient {
 		api_key = os.getenv(api_key_env)
 	}
 	project_slug := provider_string(provider, 'project_slug')!
+	team_key := provider_string(provider, 'team_key')!
 	assignee := provider_string(provider, 'assignee')!
 	client := LinearClient{
 		endpoint:        endpoint.trim_space()
 		api_key:         api_key.trim_space()
 		api_key_env:     api_key_env
 		project_slug:    project_slug.trim_space()
+		team_key:        team_key.trim_space()
 		assignee:        assignee.trim_space()
 		active_states:   config.active_states.clone()
 		terminal_states: config.terminal_states.clone()

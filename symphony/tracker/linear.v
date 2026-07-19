@@ -13,6 +13,10 @@ const candidate_query = 'query SymphonyLinearPoll($projectSlug: String!, $stateN
 
 const issues_by_id_query = 'query SymphonyLinearIssuesById($ids: [ID!]!, $projectSlug: String!, $first: Int!, $relationFirst: Int!) { issues(filter: {id: {in: $ids}, project: {slugId: {eq: $projectSlug}}}, first: $first) { nodes { id identifier title description priority state { name } branchName url assignee { id } labels { nodes { name } } inverseRelations(first: $relationFirst) { nodes { type issue { id identifier state { name } } } } createdAt updatedAt } } }'
 
+const team_candidate_query = 'query SymphonyLinearTeamPoll($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) { issues(filter: {team: {key: {eq: $teamKey}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) { nodes { id identifier title description priority state { name } branchName url assignee { id } labels { nodes { name } } inverseRelations(first: $relationFirst) { nodes { type issue { id identifier state { name } } } } createdAt updatedAt } pageInfo { hasNextPage endCursor } } }'
+
+const team_issues_by_id_query = 'query SymphonyLinearTeamIssuesById($ids: [ID!]!, $teamKey: String!, $first: Int!, $relationFirst: Int!) { issues(filter: {id: {in: $ids}, team: {key: {eq: $teamKey}}}, first: $first) { nodes { id identifier title description priority state { name } branchName url assignee { id } labels { nodes { name } } inverseRelations(first: $relationFirst) { nodes { type issue { id identifier state { name } } } } createdAt updatedAt } } }'
+
 pub struct TransportResponse {
 pub:
 	status int
@@ -26,6 +30,7 @@ pub:
 	endpoint        string
 	api_key         string
 	project_slug    string
+	team_key        string
 	assignee        string
 	active_states   []string
 	terminal_states []string         = ['Closed', 'Cancelled', 'Canceled', 'Duplicate', 'Done']
@@ -46,6 +51,19 @@ struct CandidatePayload {
 	variables CandidateVariables
 }
 
+struct TeamCandidateVariables {
+	team_key       string   @[json: teamKey]
+	state_names    []string @[json: stateNames]
+	first          int
+	relation_first int @[json: relationFirst]
+	after          json2.Any
+}
+
+struct TeamCandidatePayload {
+	query     string
+	variables TeamCandidateVariables
+}
+
 struct IdVariables {
 	ids            []string
 	project_slug   string @[json: projectSlug]
@@ -56,6 +74,18 @@ struct IdVariables {
 struct IdPayload {
 	query     string
 	variables IdVariables
+}
+
+struct TeamIdVariables {
+	ids            []string
+	team_key       string @[json: teamKey]
+	first          int
+	relation_first int @[json: relationFirst]
+}
+
+struct TeamIdPayload {
+	query     string
+	variables TeamIdVariables
 }
 
 pub struct LinearPage {
@@ -79,12 +109,38 @@ pub fn build_candidate_payload(project_slug string, states []string, after strin
 	})
 }
 
+fn build_team_candidate_payload(team_key string, states []string, after string) string {
+	after_value := if after == '' { json2.Any(json2.null) } else { json2.Any(after) }
+	return json2.encode(TeamCandidatePayload{
+		query:     team_candidate_query
+		variables: TeamCandidateVariables{
+			team_key:       team_key
+			state_names:    states
+			first:          issue_page_size
+			relation_first: relation_page_size
+			after:          after_value
+		}
+	})
+}
+
 fn build_ids_payload(project_slug string, ids []string) string {
 	return json2.encode(IdPayload{
 		query:     issues_by_id_query
 		variables: IdVariables{
 			ids:            ids
 			project_slug:   project_slug
+			first:          ids.len
+			relation_first: relation_page_size
+		}
+	})
+}
+
+fn build_team_ids_payload(team_key string, ids []string) string {
+	return json2.encode(TeamIdPayload{
+		query:     team_issues_by_id_query
+		variables: TeamIdVariables{
+			ids:            ids
+			team_key:       team_key
 			first:          ids.len
 			relation_first: relation_page_size
 		}
@@ -118,7 +174,12 @@ pub fn (client LinearClient) fetch_issues_by_states(states []string) ![]domain.I
 	mut cursor := ''
 	mut seen_cursors := map[string]bool{}
 	for {
-		response := client.post(build_candidate_payload(client.project_slug, states, cursor))!
+		body := if client.team_key != '' {
+			build_team_candidate_payload(client.team_key, states, cursor)
+		} else {
+			build_candidate_payload(client.project_slug, states, cursor)
+		}
+		response := client.post(body)!
 		page := decode_page_with_terminal_states(response.body, false, client.assignee,
 			client.terminal_states)!
 		issues << page.issues
@@ -152,7 +213,12 @@ pub fn (client LinearClient) fetch_issues_by_ids(ids []string) ![]domain.Issue {
 	for offset := 0; offset < unique_ids.len; offset += issue_page_size {
 		end := min_int(offset + issue_page_size, unique_ids.len)
 		batch := unique_ids[offset..end].clone()
-		response := client.post(build_ids_payload(client.project_slug, batch))!
+		body := if client.team_key != '' {
+			build_team_ids_payload(client.team_key, batch)
+		} else {
+			build_ids_payload(client.project_slug, batch)
+		}
+		response := client.post(body)!
 		page := decode_page_with_terminal_states(response.body, true, client.assignee,
 			client.terminal_states)!
 		for issue in page.issues {
@@ -188,8 +254,10 @@ fn (client LinearClient) validate() ! {
 	if client.api_key.trim_space() == '' {
 		return error('missing_tracker_secret: Linear API key is required')
 	}
-	if client.project_slug.trim_space() == '' {
-		return error('invalid_tracker_config: Linear project slug is required')
+	project_configured := client.project_slug.trim_space() != ''
+	team_configured := client.team_key.trim_space() != ''
+	if project_configured == team_configured {
+		return error('invalid_tracker_config: Linear requires exactly one of project_slug or team_key')
 	}
 }
 

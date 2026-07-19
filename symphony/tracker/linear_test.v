@@ -34,6 +34,32 @@ fn unauthorized_transport(_ string, _ string, _ string) !TransportResponse {
 	}
 }
 
+fn team_candidate_transport(_ string, _ string, body string) !TransportResponse {
+	payload := json2.decode[json2.Any](body) or { panic(err) }.as_map()
+	query := (payload['query'] or { panic('query') }).str()
+	variables := (payload['variables'] or { panic('variables') }).as_map()
+	assert query.contains('team: {key: {eq: $teamKey}}')
+	assert !query.contains('project: {slugId:')
+	assert (variables['teamKey'] or { panic('teamKey') }).str() == 'ENG'
+	return TransportResponse{
+		status: 200
+		body:   '{"data":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}'
+	}
+}
+
+fn team_id_transport(_ string, _ string, body string) !TransportResponse {
+	payload := json2.decode[json2.Any](body) or { panic(err) }.as_map()
+	query := (payload['query'] or { panic('query') }).str()
+	variables := (payload['variables'] or { panic('variables') }).as_map()
+	assert query.contains('team: {key: {eq: $teamKey}}')
+	assert !query.contains('project: {slugId:')
+	assert (variables['teamKey'] or { panic('teamKey') }).str() == 'ENG'
+	return TransportResponse{
+		status: 200
+		body:   '{"data":{"issues":{"nodes":[]}}}'
+	}
+}
+
 fn test_candidate_payload_uses_specified_linear_filter_and_variables() {
 	body := build_candidate_payload('demo-project', ['Todo', 'In Progress'], '')
 	payload := json2.decode[json2.Any](body) or { panic(err) }.as_map()
@@ -43,6 +69,32 @@ fn test_candidate_payload_uses_specified_linear_filter_and_variables() {
 	variables := (payload['variables'] or { panic('variables') }).as_map()
 	assert (variables['projectSlug'] or { panic('slug') }).str() == 'demo-project'
 	assert (variables['stateNames'] or { panic('states') }).as_array().len == 2
+}
+
+fn test_team_scope_filters_candidate_reads_by_exact_team_key() {
+	client := LinearClient{
+		endpoint:  'https://linear.test/graphql'
+		api_key:   'secret'
+		team_key:  'ENG'
+		transport: team_candidate_transport
+	}
+
+	issues := client.fetch_issues_by_states(['Todo']) or { panic(err) }
+
+	assert issues == []domain.Issue{}
+}
+
+fn test_team_scope_filters_id_refreshes_by_exact_team_key() {
+	client := LinearClient{
+		endpoint:  'https://linear.test/graphql'
+		api_key:   'secret'
+		team_key:  'ENG'
+		transport: team_id_transport
+	}
+
+	issues := client.fetch_issues_by_ids(['opaque-1']) or { panic(err) }
+
+	assert issues == []domain.Issue{}
 }
 
 fn test_pagination_preserves_order_and_drops_malformed_candidates() {
@@ -151,4 +203,32 @@ fn test_adapter_factory_rejects_non_string_provider_values() {
 		return
 	}
 	assert false, 'provider keys with the wrong type must fail adapter validation'
+}
+
+fn test_linear_adapter_accepts_team_scope() {
+	adapter := new_adapter(workflow.TrackerConfig{
+		kind:     'linear'
+		provider: {
+			'api_key':  yaml.Any('secret')
+			'team_key': yaml.Any('ENG')
+		}
+	}) or { panic(err) }
+
+	assert adapter.fetch_issues_by_states([]) or { panic(err) } == []domain.Issue{}
+}
+
+fn test_linear_adapter_rejects_project_and_team_scope_together() {
+	new_adapter(workflow.TrackerConfig{
+		kind:     'linear'
+		provider: {
+			'api_key':      yaml.Any('secret')
+			'project_slug': yaml.Any('demo-project')
+			'team_key':     yaml.Any('ENG')
+		}
+	}) or {
+		assert err.msg().contains('invalid_tracker_config')
+		assert err.msg().contains('exactly one')
+		return
+	}
+	assert false, 'Linear project and team scope must be mutually exclusive'
 }
