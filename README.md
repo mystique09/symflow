@@ -16,6 +16,7 @@ The product requirements and implementation record are in:
 
 - `docs/prds/v-symphony-prd.md`
 - `docs/prds/rust-symphony-prd.md`
+- `docs/prds/tracker-expansion-prd.md`
 - `docs/superpowers/plans/2026-07-18-v-symphony-implementation.md`
 - `docs/symphony-conformance.md`
 - `docs/tracker-file.md` — local ticket format, lifecycle, and recovery
