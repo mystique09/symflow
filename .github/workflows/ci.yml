@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: fmt + vet + test
+    runs-on: ubicloud-standard-4
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up V
+        uses: vlang/setup-v@v1.7
+        with:
+          version-file: .vvmrc
+
+      - name: Show V version
+        run: v version
+
+      - name: Check formatting
+        run: v fmt -verify bin symphony
+
+      - name: Run V vet (lint)
+        run: v vet bin symphony
+
+      - name: Run tests
+        run: v test symphony
