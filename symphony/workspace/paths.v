@@ -60,6 +60,10 @@ pub fn prepare(root string, identifier string, hooks workflow.HooksConfig) !Work
 }
 
 pub fn prepare_cancelable(root string, identifier string, hooks workflow.HooksConfig, cancel chan bool) !Workspace {
+	return prepare_cancelable_sanitized(root, identifier, hooks, []string{}, cancel)
+}
+
+pub fn prepare_cancelable_sanitized(root string, identifier string, hooks workflow.HooksConfig, secret_environment_names []string, cancel chan bool) !Workspace {
 	os.mkdir_all(root) or {
 		return error('workspace_create_error: unable to create workspace root')
 	}
@@ -84,8 +88,8 @@ pub fn prepare_cancelable(root string, identifier string, hooks workflow.HooksCo
 		created_now: created_now
 	}
 	if created_now && hooks.after_create.trim_space() != '' {
-		run_hook_cancelable(hooks.after_create, path, hooks.timeout_ms, default_hook_output_limit,
-			cancel) or {
+		run_hook_cancelable_sanitized(hooks.after_create, path, hooks.timeout_ms,
+			default_hook_output_limit, secret_environment_names, cancel) or {
 			safely_remove_workspace_path(canonical_root, path) or {}
 			return error('after_create_hook_error: ${err.msg()}')
 		}
@@ -94,15 +98,18 @@ pub fn prepare_cancelable(root string, identifier string, hooks workflow.HooksCo
 }
 
 pub fn remove(space Workspace, hooks workflow.HooksConfig) ![]string {
+	return remove_sanitized(space, hooks, []string{})
+}
+
+pub fn remove_sanitized(space Workspace, hooks workflow.HooksConfig, secret_environment_names []string) ![]string {
 	mut warnings := []string{}
 	path := validate_under_root(space.root, space.path)!
 	if !os.exists(path) {
 		return warnings
 	}
 	if hooks.before_remove.trim_space() != '' {
-		run_hook(hooks.before_remove, path, hooks.timeout_ms, default_hook_output_limit) or {
-			warnings << 'before_remove_hook_error: ${err.msg()}'
-		}
+		run_hook_sanitized(hooks.before_remove, path, hooks.timeout_ms, default_hook_output_limit,
+			secret_environment_names) or { warnings << 'before_remove_hook_error: ${err.msg()}' }
 	}
 	safely_remove_workspace_path(space.root, path) or {
 		return error('workspace_remove_error: unable to remove issue workspace')

@@ -21,33 +21,56 @@ pub fn run_before(space Workspace, hooks workflow.HooksConfig) ! {
 }
 
 pub fn run_before_cancelable(space Workspace, hooks workflow.HooksConfig, cancel chan bool) ! {
+	run_before_cancelable_sanitized(space, hooks, []string{}, cancel)!
+}
+
+pub fn run_before_cancelable_sanitized(space Workspace, hooks workflow.HooksConfig, secret_environment_names []string, cancel chan bool) ! {
 	if hooks.before_run.trim_space() == '' {
 		return
 	}
-	run_hook_cancelable(hooks.before_run, space.path, hooks.timeout_ms, default_hook_output_limit,
-		cancel)!
+	run_hook_cancelable_sanitized(hooks.before_run, space.path, hooks.timeout_ms,
+		default_hook_output_limit, secret_environment_names, cancel)!
 }
 
 pub fn run_after(space Workspace, hooks workflow.HooksConfig) []string {
+	return run_after_sanitized(space, hooks, []string{})
+}
+
+pub fn run_after_sanitized(space Workspace, hooks workflow.HooksConfig, secret_environment_names []string) []string {
 	cancel := chan bool{}
-	return run_after_cancelable(space, hooks, cancel)
+	return run_after_cancelable_sanitized(space, hooks, secret_environment_names, cancel)
 }
 
 pub fn run_after_cancelable(space Workspace, hooks workflow.HooksConfig, cancel chan bool) []string {
+	return run_after_cancelable_sanitized(space, hooks, []string{}, cancel)
+}
+
+pub fn run_after_cancelable_sanitized(space Workspace, hooks workflow.HooksConfig, secret_environment_names []string, cancel chan bool) []string {
 	if hooks.after_run.trim_space() == '' {
 		return []string{}
 	}
-	run_hook_cancelable(hooks.after_run, space.path, hooks.timeout_ms, default_hook_output_limit,
-		cancel) or { return ['after_run_hook_error: ${err.msg()}'] }
+	run_hook_cancelable_sanitized(hooks.after_run, space.path, hooks.timeout_ms,
+		default_hook_output_limit, secret_environment_names, cancel) or {
+		return ['after_run_hook_error: ${err.msg()}']
+	}
 	return []string{}
 }
 
 pub fn run_hook(script string, cwd string, timeout_ms int, max_output int) !HookResult {
+	return run_hook_sanitized(script, cwd, timeout_ms, max_output, []string{})
+}
+
+pub fn run_hook_sanitized(script string, cwd string, timeout_ms int, max_output int, secret_environment_names []string) !HookResult {
 	cancel := chan bool{}
-	return run_hook_cancelable(script, cwd, timeout_ms, max_output, cancel)
+	return run_hook_cancelable_sanitized(script, cwd, timeout_ms, max_output,
+		secret_environment_names, cancel)
 }
 
 pub fn run_hook_cancelable(script string, cwd string, timeout_ms int, max_output int, cancel chan bool) !HookResult {
+	return run_hook_cancelable_sanitized(script, cwd, timeout_ms, max_output, []string{}, cancel)
+}
+
+pub fn run_hook_cancelable_sanitized(script string, cwd string, timeout_ms int, max_output int, secret_environment_names []string, cancel chan bool) !HookResult {
 	if script.trim_space() == '' {
 		return HookResult{}
 	}
@@ -62,6 +85,11 @@ pub fn run_hook_cancelable(script string, cwd string, timeout_ms int, max_output
 	process.set_work_folder(cwd)
 	process.set_redirect_stdio()
 	process.use_pgroup = true
+	mut environment := os.environ()
+	for name in secret_environment_names {
+		environment.delete(name)
+	}
+	process.set_environment(environment)
 	started := time.now()
 	process.run()
 	if process.status != .running {

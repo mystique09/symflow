@@ -123,6 +123,13 @@ pub fn (client FileClient) secret_values() []string {
 	return []string{}
 }
 
+// validate_scope confirms that the directory validated during construction remains available.
+pub fn (client FileClient) validate_scope() ! {
+	if !os.is_dir(client.root) {
+		return error('file_tracker_directory_error: configured ticket directory is unavailable')
+	}
+}
+
 // record_outcome persists dispatch-owned ticket metadata.
 // A true result means successful completion was stored and continuation can stop.
 pub fn (client FileClient) record_outcome(issue domain.Issue, outcome domain.AttemptOutcome) !bool {

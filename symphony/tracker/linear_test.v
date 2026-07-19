@@ -60,6 +60,23 @@ fn team_id_transport(_ string, _ string, body string) !TransportResponse {
 	}
 }
 
+fn linear_scope_transport(_ string, _ string, body string) !TransportResponse {
+	payload := json2.decode[json2.Any](body) or { panic(err) }.as_map()
+	query := string_value(payload, 'query')
+	assert query.contains('projects(filter: {slugId: {eq: $projectSlug}}')
+	return TransportResponse{
+		status: 200
+		body:   '{"data":{"projects":{"nodes":[{"id":"project-1"}]}}}'
+	}
+}
+
+fn linear_missing_scope_transport(_ string, _ string, _ string) !TransportResponse {
+	return TransportResponse{
+		status: 200
+		body:   '{"data":{"projects":{"nodes":[]}}}'
+	}
+}
+
 fn test_candidate_payload_uses_specified_linear_filter_and_variables() {
 	body := build_candidate_payload('demo-project', ['Todo', 'In Progress'], '')
 	payload := json2.decode[json2.Any](body) or { panic(err) }.as_map()
@@ -95,6 +112,27 @@ fn test_team_scope_filters_id_refreshes_by_exact_team_key() {
 	issues := client.fetch_issues_by_ids(['opaque-1']) or { panic(err) }
 
 	assert issues == []domain.Issue{}
+}
+
+fn test_linear_scope_validation_rejects_unknown_project() {
+	valid := LinearClient{
+		endpoint:     'https://linear.test/graphql'
+		api_key:      'secret'
+		project_slug: 'demo-project'
+		transport:    linear_scope_transport
+	}
+	valid.validate_scope() or { panic(err) }
+
+	missing := LinearClient{
+		...valid
+		transport: linear_missing_scope_transport
+	}
+	missing.validate_scope() or {
+		assert err.msg().contains('tracker_scope')
+		assert err.msg().contains('project')
+		return
+	}
+	assert false, 'unknown Linear project scopes must be rejected before activation'
 }
 
 fn test_pagination_preserves_order_and_drops_malformed_candidates() {

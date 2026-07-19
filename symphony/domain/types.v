@@ -13,11 +13,13 @@ pub:
 
 pub struct Issue {
 pub:
-	id           string
-	identifier   string
-	title        string
-	description  string
-	priority     int = -1
+	id          string
+	identifier  string
+	title       string
+	description string
+	priority    int = -1
+	// queue_rank preserves an adapter-owned queue order when the provider exposes one.
+	queue_rank   int = -1
 	state        string
 	branch_name  string
 	url          string

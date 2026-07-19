@@ -66,6 +66,32 @@ fn test_before_run_executes_for_every_attempt() {
 	assert os.read_file(os.join_path(space.path, 'attempts.txt')) or { panic(err) } == 'xx'
 }
 
+fn test_tracker_secrets_are_removed_from_every_workspace_hook() {
+	root := temp_workspace_root()
+	defer {
+		os.rmdir_all(root) or {}
+		os.unsetenv('SYMPHONY_HOOK_TEST_SECRET')
+	}
+	os.setenv('SYMPHONY_HOOK_TEST_SECRET', 'must-not-leak', true)
+	hooks := workflow.HooksConfig{
+		after_create:  'test -z "\$SYMPHONY_HOOK_TEST_SECRET"'
+		before_run:    'test -z "\$SYMPHONY_HOOK_TEST_SECRET"'
+		after_run:     'test -z "\$SYMPHONY_HOOK_TEST_SECRET"'
+		before_remove: 'test -z "\$SYMPHONY_HOOK_TEST_SECRET"'
+		timeout_ms:    2_000
+	}
+	cancel := chan bool{}
+	space := prepare_cancelable_sanitized(root, 'OPS-SECRET', hooks, [
+		'SYMPHONY_HOOK_TEST_SECRET',
+	], cancel) or { panic(err) }
+	run_before_cancelable_sanitized(space, hooks, ['SYMPHONY_HOOK_TEST_SECRET'], cancel) or {
+		panic(err)
+	}
+	assert run_after_sanitized(space, hooks, ['SYMPHONY_HOOK_TEST_SECRET']) == []string{}
+	assert remove_sanitized(space, hooks, ['SYMPHONY_HOOK_TEST_SECRET']) or { panic(err) } == []string{}
+	assert os.getenv('SYMPHONY_HOOK_TEST_SECRET') == 'must-not-leak'
+}
+
 fn test_hook_timeout_terminates_process_group() {
 	root := temp_workspace_root()
 	defer {

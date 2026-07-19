@@ -45,6 +45,14 @@ pub fn is_routable(issue domain.Issue, policy Policy) bool {
 }
 
 fn compare_issues(left &domain.Issue, right &domain.Issue) int {
+	left_ranked := left.queue_rank >= 0
+	right_ranked := right.queue_rank >= 0
+	if left_ranked != right_ranked {
+		return if left_ranked { -1 } else { 1 }
+	}
+	if left_ranked && left.queue_rank != right.queue_rank {
+		return if left.queue_rank < right.queue_rank { -1 } else { 1 }
+	}
 	left_unknown := left.priority < 1 || left.priority > 4
 	right_unknown := right.priority < 1 || right.priority > 4
 	if left_unknown != right_unknown {

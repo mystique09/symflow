@@ -56,6 +56,24 @@ fn test_candidate_sort_is_priority_then_creation_then_identifier() {
 	assert sorted.map(it.id) == ['1', '2', '3', '5', '4']
 }
 
+fn test_candidate_sort_preserves_provider_queue_rank() {
+	issues := [
+		domain.Issue{
+			identifier: 'SECOND-BY-TIME'
+			created_at: '2026-01-01T00:00:00Z'
+			queue_rank: 1
+		},
+		domain.Issue{
+			identifier: 'FIRST-IN-QUEUE'
+			created_at: '2026-07-01T00:00:00Z'
+			queue_rank: 0
+		},
+	]
+
+	sorted := sort_candidates(issues)
+	assert sorted.map(it.identifier) == ['FIRST-IN-QUEUE', 'SECOND-BY-TIME']
+}
+
 fn test_available_slots_honors_global_and_per_state_limits() {
 	running := [
 		domain.RunningSnapshot{

@@ -11,6 +11,7 @@ pub interface Tracker {
 	record_outcome(issue domain.Issue, outcome domain.AttemptOutcome) !bool
 	secret_environment_names() []string
 	secret_values() []string
+	validate_scope() !
 }
 
 // validate_adapter_config checks provider-owned structure without resolving live credentials.
@@ -20,7 +21,7 @@ pub fn validate_adapter_config(config workflow.TrackerConfig) ! {
 			provider_string(config.provider, 'root')!
 		}
 		'github' {
-			github_from_config(with_validation_secret(config, 'token'))!
+			new_github_adapter(with_validation_secret(config, 'token'))!
 		}
 		'linear' {
 			linear_from_config(with_validation_secret(config, 'api_key'))!
@@ -32,18 +33,63 @@ pub fn validate_adapter_config(config workflow.TrackerConfig) ! {
 pub fn new_adapter(config workflow.TrackerConfig) !Tracker {
 	return match config.kind.trim_space().to_lower() {
 		'file' { Tracker(file_from_config(config)!) }
-		'github' { Tracker(github_from_config(config)!) }
+		'github' { new_github_adapter(config)! }
 		'linear' { Tracker(linear_from_config(config)!) }
 		else { return error('unsupported_tracker_kind: `${config.kind}` is not supported') }
 	}
 }
 
-fn github_from_config(config workflow.TrackerConfig) !GitHubClient {
+// activate_adapter verifies the provider-owned scope before it becomes effective.
+pub fn activate_adapter(config workflow.TrackerConfig) !Tracker {
+	client := new_adapter(config)!
+	client.validate_scope()!
+	return client
+}
+
+fn new_github_adapter(config workflow.TrackerConfig) !Tracker {
+	return Tracker(github_project_from_config(config)!)
+}
+
+fn github_project_from_config(config workflow.TrackerConfig) !GitHubProjectClient {
 	provider := config.provider.clone()
 	mut endpoint := provider_string(provider, 'endpoint')!
 	if endpoint == '' {
-		endpoint = 'https://api.github.com'
+		endpoint = 'https://api.github.com/graphql'
 	}
+	token, token_env := github_token(provider)!
+	mut owner_type := provider_string(provider, 'owner_type')!
+	if owner_type == '' {
+		owner_type = 'organization'
+	}
+	mut status_field := provider_string(provider, 'status_field')!
+	if status_field == '' {
+		status_field = 'Status'
+	}
+	mut closed_state := provider_string(provider, 'closed_state')!
+	if closed_state == '' {
+		closed_state = 'Closed'
+	}
+	client := GitHubProjectClient{
+		endpoint:        endpoint.trim_space().trim_right('/')
+		token:           token
+		token_env:       token_env
+		owner_type:      owner_type.trim_space().to_lower()
+		owner:           provider_string(provider, 'owner')!.trim_space()
+		project_number:  provider_int(provider, 'project_number')!
+		status_field:    status_field.trim_space()
+		state_options:   provider_string_map(provider, 'state_options')!
+		closed_state:    closed_state.trim_space()
+		write_outcomes:  provider_bool(provider, 'write_outcomes')!
+		success_state:   provider_string(provider, 'success_state')!.trim_space()
+		blocked_state:   provider_string(provider, 'blocked_state')!.trim_space()
+		active_states:   config.active_states.clone()
+		terminal_states: config.terminal_states.clone()
+	}
+	client.validate()!
+	return client
+}
+
+fn github_token(provider map[string]yaml.Any) !(string, string) {
 	token_source := provider_string(provider, 'token')!
 	mut token_env := ''
 	mut token := token_source
@@ -55,25 +101,7 @@ fn github_from_config(config workflow.TrackerConfig) !GitHubClient {
 		token_env = token_source[1..]
 		token = os.getenv(token_env)
 	}
-	mut closed_state := provider_string(provider, 'closed_state')!
-	if closed_state == '' {
-		closed_state = 'Closed'
-	}
-	client := GitHubClient{
-		endpoint:        endpoint.trim_space().trim_right('/')
-		token:           token.trim_space()
-		token_env:       token_env
-		repository:      provider_string(provider, 'repository')!.trim_space()
-		state_labels:    provider_string_map(provider, 'state_labels')!
-		closed_state:    closed_state.trim_space()
-		write_outcomes:  provider_bool(provider, 'write_outcomes')!
-		success_state:   provider_string(provider, 'success_state')!.trim_space()
-		blocked_state:   provider_string(provider, 'blocked_state')!.trim_space()
-		active_states:   config.active_states.clone()
-		terminal_states: config.terminal_states.clone()
-	}
-	client.validate()!
-	return client
+	return token.trim_space(), token_env
 }
 
 fn file_from_config(config workflow.TrackerConfig) !FileClient {
@@ -143,6 +171,26 @@ fn provider_bool(provider map[string]yaml.Any, key string) !bool {
 		return value
 	}
 	return error('invalid_tracker_config: tracker.provider.${key} must be a boolean')
+}
+
+fn provider_int(provider map[string]yaml.Any, key string) !int {
+	value := provider[key] or { return 0 }
+	if value is int {
+		return value
+	}
+	if value is i64 {
+		return int(value)
+	}
+	if value is u64 && value <= u64(2_147_483_647) {
+		return int(value)
+	}
+	if value is f64 {
+		integer := int(value)
+		if value >= 0 && value <= 2_147_483_647 && value == f64(integer) {
+			return integer
+		}
+	}
+	return error('invalid_tracker_config: tracker.provider.${key} must be an integer')
 }
 
 fn with_validation_secret(config workflow.TrackerConfig, key string) workflow.TrackerConfig {

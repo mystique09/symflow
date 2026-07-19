@@ -15,8 +15,14 @@ const shutdown_timeout = 10 * time.second
 const service_message_limit = 8 * 1024
 
 struct WorkerEvent {
-	issue   domain.Issue
-	outcome domain.AttemptOutcome
+	definition workflow.WorkflowDefinition
+	issue      domain.Issue
+	outcome    domain.AttemptOutcome
+}
+
+struct DefinitionReloadDecision {
+	definition    workflow.WorkflowDefinition
+	error_message string
 }
 
 pub struct ServiceOptions {
@@ -28,7 +34,7 @@ pub:
 pub fn run_service(options ServiceOptions, runtime Runtime, refresh chan bool, shutdown chan bool) ! {
 	mut store := workflow.new_store(options.workflow_path, .dispatch)
 	mut definition := store.reload()!
-	tracker.new_adapter(definition.config.tracker)!
+	tracker.activate_adapter(definition.config.tracker)!
 	cleanup_terminal_workspaces(definition) or {
 		emit(definition, 'warn', 'startup_cleanup_failed', domain.Issue{}, 0, err.msg())
 	}
@@ -41,14 +47,12 @@ pub fn run_service(options ServiceOptions, runtime Runtime, refresh chan bool, s
 		now_ms := time.now().unix_milli()
 		if now_ms >= next_poll_ms {
 			if next := store.reload() {
-				tracker.new_adapter(next.config.tracker) or {
+				decision := select_effective_definition(definition, next)
+				if decision.error_message != '' {
 					emit(definition, 'error', 'workflow_reload_failed', domain.Issue{}, 0,
-						err.msg())
-					dispatched_once = true
-					next_poll_ms = now_ms + i64(definition.config.polling.interval_ms)
-					continue
+						decision.error_message)
 				}
-				definition = next
+				definition = decision.definition
 			} else {
 				emit(definition, 'error', 'workflow_reload_failed', domain.Issue{}, 0, err.msg())
 			}
@@ -64,8 +68,7 @@ pub fn run_service(options ServiceOptions, runtime Runtime, refresh chan bool, s
 		}
 		select {
 			event := <-events {
-				handle_worker_event(definition, runtime, event, mut cancellations, mut
-					remove_after_finish)
+				handle_worker_event(runtime, event, mut cancellations, mut remove_after_finish)
 			}
 			_ := <-refresh {
 				released := runtime.release_blocked()
@@ -77,12 +80,27 @@ pub fn run_service(options ServiceOptions, runtime Runtime, refresh chan bool, s
 			}
 			_ := <-shutdown {
 				cancel_all(cancellations)
-				drain_workers(definition, runtime, events, mut cancellations, mut
-					remove_after_finish)
+				drain_workers(runtime, events, mut cancellations, mut remove_after_finish)
 				return
 			}
 			service_tick {}
 		}
+	}
+}
+
+fn select_effective_definition(current workflow.WorkflowDefinition, next workflow.WorkflowDefinition) DefinitionReloadDecision {
+	// Provider scope is live-validated only when tracker front matter may have
+	// changed. A rejected replacement leaves the last-known-good queue active.
+	if next.raw_front_matter != current.raw_front_matter {
+		tracker.activate_adapter(next.config.tracker) or {
+			return DefinitionReloadDecision{
+				definition:    current
+				error_message: err.msg()
+			}
+		}
+	}
+	return DefinitionReloadDecision{
+		definition: next
 	}
 }
 
@@ -249,20 +267,25 @@ fn spawn_worker(definition workflow.WorkflowDefinition, runtime Runtime, issue d
 
 fn run_worker(definition workflow.WorkflowDefinition, runtime Runtime, issue domain.Issue, attempt int, events chan WorkerEvent, cancel chan bool) {
 	started := time.now()
-	space := workspace.prepare_cancelable(definition.config.workspace.root, issue.identifier,
-		definition.config.hooks, cancel) or {
-		send_failure(events, issue, attempt, started, err.msg())
+	tracker_secret_names := secret_environment_names(definition.config) or {
+		send_failure(definition, events, issue, attempt, started, err.msg())
 		return
 	}
-	workspace.run_before_cancelable(space, definition.config.hooks, cancel) or {
-		workspace.run_after(space, definition.config.hooks)
-		send_failure(events, issue, attempt, started, err.msg())
+	space := workspace.prepare_cancelable_sanitized(definition.config.workspace.root,
+		issue.identifier, definition.config.hooks, tracker_secret_names, cancel) or {
+		send_failure(definition, events, issue, attempt, started, err.msg())
+		return
+	}
+	workspace.run_before_cancelable_sanitized(space, definition.config.hooks, tracker_secret_names,
+		cancel) or {
+		workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
+		send_failure(definition, events, issue, attempt, started, err.msg())
 		return
 	}
 	prompt_attempt := if attempt == 0 { -1 } else { attempt }
 	rendered := prompt.render(definition.prompt_template, issue, prompt_attempt) or {
-		workspace.run_after(space, definition.config.hooks)
-		send_failure(events, issue, attempt, started, err.msg())
+		workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
+		send_failure(definition, events, issue, attempt, started, err.msg())
 		return
 	}
 	result := codex.run_session_observed(codex.ClientConfig{
@@ -274,7 +297,7 @@ fn run_worker(definition workflow.WorkflowDefinition, runtime Runtime, issue dom
 		read_timeout_ms:          definition.config.codex.read_timeout_ms
 		turn_timeout_ms:          definition.config.codex.turn_timeout_ms
 		stall_timeout_ms:         definition.config.codex.stall_timeout_ms
-		secret_environment_names: secret_environment_names(definition.config)
+		secret_environment_names: tracker_secret_names
 	}, rendered, codex.SessionPolicy{
 		max_turns:           definition.config.agent.max_turns
 		continuation_prompt: 'Continue working on the same issue in this existing thread. Re-check the task state, complete the remaining work, and run the relevant verification.'
@@ -287,18 +310,19 @@ fn run_worker(definition workflow.WorkflowDefinition, runtime Runtime, issue dom
 		})
 		emit_session(definition, update.event, issue, attempt, update)
 	}) or {
-		workspace.run_after(space, definition.config.hooks)
-		send_failure(events, issue, attempt, started, err.msg())
+		workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
+		send_failure(definition, events, issue, attempt, started, err.msg())
 		return
 	}
-	warnings := workspace.run_after(space, definition.config.hooks)
+	warnings := workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
 	mut message := result.error_message
 	if warnings.len > 0 {
 		message = [message, warnings.join('; ')].filter(it != '').join('; ')
 	}
 	events <- WorkerEvent{
-		issue:   issue
-		outcome: domain.AttemptOutcome{
+		definition: definition
+		issue:      issue
+		outcome:    domain.AttemptOutcome{
 			kind:              result.outcome
 			issue_id:          issue.id
 			attempt:           attempt
@@ -336,15 +360,16 @@ fn issue_still_active_and_routable(definition workflow.WorkflowDefinition, issue
 	return policy.is_active(refreshed[0].state) && scheduler.is_routable(refreshed[0], policy)
 }
 
-fn send_failure(events chan WorkerEvent, issue domain.Issue, attempt int, started time.Time, message string) {
+fn send_failure(definition workflow.WorkflowDefinition, events chan WorkerEvent, issue domain.Issue, attempt int, started time.Time, message string) {
 	kind := if message.contains('hook_canceled') {
 		domain.AttemptOutcomeKind.canceled
 	} else {
 		domain.AttemptOutcomeKind.failed
 	}
 	events <- WorkerEvent{
-		issue:   issue
-		outcome: domain.AttemptOutcome{
+		definition: definition
+		issue:      issue
+		outcome:    domain.AttemptOutcome{
 			kind:            kind
 			issue_id:        issue.id
 			attempt:         attempt
@@ -354,7 +379,8 @@ fn send_failure(events chan WorkerEvent, issue domain.Issue, attempt int, starte
 	}
 }
 
-fn handle_worker_event(definition workflow.WorkflowDefinition, runtime Runtime, event WorkerEvent, mut cancellations map[string]chan bool, mut remove_after_finish map[string]bool) {
+fn handle_worker_event(runtime Runtime, event WorkerEvent, mut cancellations map[string]chan bool, mut remove_after_finish map[string]bool) {
+	definition := event.definition
 	cancellations.delete(event.issue.id)
 	completion_persisted := persist_tracker_outcome(definition, event)
 	runtime.finish(event.outcome, time.now().unix_milli())
@@ -393,13 +419,12 @@ fn cancel_all(cancellations map[string]chan bool) {
 	}
 }
 
-fn drain_workers(definition workflow.WorkflowDefinition, runtime Runtime, events chan WorkerEvent, mut cancellations map[string]chan bool, mut remove_after_finish map[string]bool) {
+fn drain_workers(runtime Runtime, events chan WorkerEvent, mut cancellations map[string]chan bool, mut remove_after_finish map[string]bool) {
 	deadline := time.now().add(shutdown_timeout)
 	for cancellations.len > 0 && time.now() < deadline {
 		select {
 			event := <-events {
-				handle_worker_event(definition, runtime, event, mut cancellations, mut
-					remove_after_finish)
+				handle_worker_event(runtime, event, mut cancellations, mut remove_after_finish)
 			}
 			service_tick {}
 		}
@@ -418,11 +443,11 @@ fn request_cancel(cancel chan bool) {
 
 fn remove_issue_workspace(definition workflow.WorkflowDefinition, issue domain.Issue) ! {
 	path := workspace.path_for(definition.config.workspace.root, issue.identifier)!
-	warnings := workspace.remove(workspace.Workspace{
+	warnings := workspace.remove_sanitized(workspace.Workspace{
 		root: definition.config.workspace.root
 		path: path
 		key:  workspace.workspace_key(issue.identifier)
-	}, definition.config.hooks)!
+	}, definition.config.hooks, secret_environment_names(definition.config)!)!
 	for warning in warnings {
 		emit(definition, 'warn', 'workspace_cleanup_hook_failed', issue, 0, warning)
 	}
@@ -436,8 +461,8 @@ fn scheduling_policy(config workflow.Config) scheduler.Policy {
 	}
 }
 
-fn secret_environment_names(config workflow.Config) []string {
-	client := tracker.new_adapter(config.tracker) or { return []string{} }
+fn secret_environment_names(config workflow.Config) ![]string {
+	client := tracker.new_adapter(config.tracker)!
 	return client.secret_environment_names()
 }
 

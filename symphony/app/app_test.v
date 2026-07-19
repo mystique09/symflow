@@ -84,7 +84,7 @@ fn test_validate_workflow_rejects_invalid_github_state_mapping_without_live_cred
 	}
 	path := os.join_path(dir, 'WORKFLOW.md')
 	os.write_file(path,
-		'---\ntracker:\n  kind: github\n  provider:\n    repository: octo/example\n    state_labels:\n      Todo: status:ready\n      In Progress: status:ready\n  active_states:\n    - Todo\n    - In Progress\n  terminal_states:\n    - Closed\n---\nWork on {{ issue.identifier }}')!
+		'---\ntracker:\n  kind: github\n  provider:\n    owner_type: organization\n    owner: octo\n    project_number: 7\n    state_options:\n      Todo: Ready\n      In Progress: Ready\n  active_states:\n    - Todo\n    - In Progress\n  terminal_states:\n    - Closed\n---\nWork on {{ issue.identifier }}')!
 
 	validate_workflow(path) or {
 		assert err.msg().contains('invalid_tracker_config')
@@ -102,7 +102,7 @@ fn test_validate_workflow_accepts_github_mapping_without_live_credentials() {
 	}
 	path := os.join_path(dir, 'WORKFLOW.md')
 	os.write_file(path,
-		'---\ntracker:\n  kind: github\n  provider:\n    repository: octo/example\n    token: $SYMPHONY_TEST_UNUSED_GITHUB_TOKEN\n    state_labels:\n      Todo: status:todo\n      In Progress: status:in-progress\n    closed_state: Closed\n  active_states:\n    - Todo\n    - In Progress\n  terminal_states:\n    - Closed\n---\nWork on {{ issue.identifier }}')!
+		'---\ntracker:\n  kind: github\n  provider:\n    owner_type: organization\n    owner: octo\n    project_number: 7\n    token: $SYMPHONY_TEST_UNUSED_GITHUB_TOKEN\n    status_field: Status\n    state_options:\n      Todo: Todo\n      In Progress: In Progress\n    closed_state: Closed\n  active_states:\n    - Todo\n    - In Progress\n  terminal_states:\n    - Closed\n---\nWork on {{ issue.identifier }}')!
 
 	definition := validate_workflow(path) or { panic(err) }
 

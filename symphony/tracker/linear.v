@@ -2,9 +2,9 @@ module tracker
 
 import json2
 import net.http
-import time
 import symphony.domain
 import symphony.observability
+import time
 
 const issue_page_size = 50
 const relation_page_size = 50
@@ -16,6 +16,9 @@ const issues_by_id_query = 'query SymphonyLinearIssuesById($ids: [ID!]!, $projec
 const team_candidate_query = 'query SymphonyLinearTeamPoll($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) { issues(filter: {team: {key: {eq: $teamKey}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) { nodes { id identifier title description priority state { name } branchName url assignee { id } labels { nodes { name } } inverseRelations(first: $relationFirst) { nodes { type issue { id identifier state { name } } } } createdAt updatedAt } pageInfo { hasNextPage endCursor } } }'
 
 const team_issues_by_id_query = 'query SymphonyLinearTeamIssuesById($ids: [ID!]!, $teamKey: String!, $first: Int!, $relationFirst: Int!) { issues(filter: {id: {in: $ids}, team: {key: {eq: $teamKey}}}, first: $first) { nodes { id identifier title description priority state { name } branchName url assignee { id } labels { nodes { name } } inverseRelations(first: $relationFirst) { nodes { type issue { id identifier state { name } } } } createdAt updatedAt } } }'
+
+const project_scope_query = 'query SymphonyLinearProjectScope($projectSlug: String!) { projects(filter: {slugId: {eq: $projectSlug}}, first: 1) { nodes { id } } }'
+const team_scope_query = 'query SymphonyLinearTeamScope($teamKey: String!) { teams(filter: {key: {eq: $teamKey}}, first: 1) { nodes { id } } }'
 
 pub struct TransportResponse {
 pub:
@@ -86,6 +89,24 @@ struct TeamIdVariables {
 struct TeamIdPayload {
 	query     string
 	variables TeamIdVariables
+}
+
+struct ProjectScopeVariables {
+	project_slug string @[json: projectSlug]
+}
+
+struct ProjectScopePayload {
+	query     string
+	variables ProjectScopeVariables
+}
+
+struct TeamScopeVariables {
+	team_key string @[json: teamKey]
+}
+
+struct TeamScopePayload {
+	query     string
+	variables TeamScopeVariables
 }
 
 pub struct LinearPage {
@@ -240,6 +261,43 @@ pub fn (client LinearClient) secret_environment_names() []string {
 
 pub fn (client LinearClient) secret_values() []string {
 	return if client.api_key == '' { []string{} } else { [client.api_key] }
+}
+
+// validate_scope verifies that the exact configured Linear project or team exists.
+pub fn (client LinearClient) validate_scope() ! {
+	client.validate()!
+	body := if client.team_key != '' {
+		json2.encode(TeamScopePayload{
+			query:     team_scope_query
+			variables: TeamScopeVariables{
+				team_key: client.team_key
+			}
+		})
+	} else {
+		json2.encode(ProjectScopePayload{
+			query:     project_scope_query
+			variables: ProjectScopeVariables{
+				project_slug: client.project_slug
+			}
+		})
+	}
+	response := client.post(body)!
+	decoded := json2.decode[json2.Any](response.body) or {
+		return error('tracker_response: Linear scope response was not valid JSON')
+	}
+	root := decoded.as_map()
+	if errors_value := root['errors'] {
+		if errors_value.as_array().len > 0 {
+			return error('tracker_response: Linear returned GraphQL errors')
+		}
+	}
+	data := map_value(root, 'data')
+	collection_name := if client.team_key != '' { 'teams' } else { 'projects' }
+	nodes := array_value(map_value(data, collection_name), 'nodes')
+	if nodes.len != 1 || string_value(nodes[0].as_map(), 'id').trim_space() == '' {
+		scope_name := if client.team_key != '' { 'team' } else { 'project' }
+		return error('tracker_scope: configured Linear ${scope_name} was not found')
+	}
 }
 
 // record_outcome preserves the Linear adapter's read-only behavior.
@@ -400,32 +458,6 @@ fn priority_value(values map[string]json2.Any, key string) int {
 		u32 { int(value) }
 		else { -1 }
 	}
-}
-
-fn valid_timestamp(value string) string {
-	if value == '' {
-		return ''
-	}
-	time.parse_iso8601(value) or { return '' }
-	return value
-}
-
-fn map_value(values map[string]json2.Any, key string) map[string]json2.Any {
-	return (values[key] or { return map[string]json2.Any{} }).as_map()
-}
-
-fn array_value(values map[string]json2.Any, key string) []json2.Any {
-	return (values[key] or { return []json2.Any{} }).as_array()
-}
-
-fn string_value(values map[string]json2.Any, key string) string {
-	value := values[key] or { return '' }
-	return if value is string { value } else { '' }
-}
-
-fn bool_value(values map[string]json2.Any, key string) bool {
-	value := values[key] or { return false }
-	return if value is bool { value } else { false }
 }
 
 fn min_int(left int, right int) int {
