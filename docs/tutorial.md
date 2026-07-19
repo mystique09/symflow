@@ -40,7 +40,29 @@ git ls-remote 'git@github.com:your-org/your-repository.git' HEAD
 
 Why this is needed: the example `after_create` hook creates one isolated
 workspace per ticket and runs `git clone "$SYMPHONY_REPOSITORY_URL" .` there.
-Retries reuse that checkout.
+After cloning, Symphony performs Git branch setup on the host before Codex
+starts. It reuses the ticket's exact local or `origin` branch when available;
+otherwise it creates the ticket branch from `workspace.base_branch`. When a
+tracker provides no branch name, Symphony creates
+`symphony/<issue-identifier>`. Retries reuse that checkout.
+
+Set the integration branch for new ticket branches in `WORKFLOW.md`:
+
+```yaml
+workspace:
+  root: ./symphony_workspaces
+  base_branch: main # Use staging here when staging is your integration branch.
+```
+
+Symphony refuses to start an agent on `main`, `master`, or the configured base
+branch. It also refuses to switch a reused workspace with uncommitted changes,
+preventing work from being silently moved or overwritten. Symphony itself does
+not push. Its managed pre-push hook rejects normal pushes to the configured
+base, `main`, and `master`, while delegating the repository's existing hooks.
+Because local Git hooks can be bypassed, enable server-side branch protection
+for non-bypassable enforcement. The injected Git policy also tells Codex to stay
+on the prepared issue branch and not push unless the ticket or workflow
+explicitly requires it.
 
 ## 2. Install and build
 

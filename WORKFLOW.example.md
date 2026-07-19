@@ -18,6 +18,8 @@ polling:
   interval_ms: 30000
 workspace:
   root: ./symphony_workspaces
+  # Existing ticket branches are reused; otherwise create one from this branch.
+  base_branch: main
 hooks:
   after_create: |
     if [ -z "$SYMPHONY_REPOSITORY_URL" ]; then

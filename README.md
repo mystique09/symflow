@@ -90,8 +90,17 @@ Successful attempts are changed atomically to `completed`; blocked attempts are
 changed to `blocked`. See [the file tracker guide](docs/tracker-file.md).
 
 `workspace.root` is also resolved relative to `WORKFLOW.md`; when omitted, the
-default is `<system-temp>/symphony_workspaces`. Linear and GitHub adapters can
-reference host environment variables from `tracker.provider.api_key` and
+default is `<system-temp>/symphony_workspaces`. After the clone hook, Symphony
+checks out the ticket's `branch_name` when it exists locally or on `origin`.
+Otherwise it creates that branch from `workspace.base_branch` (default `main`),
+or generates `symphony/<issue-identifier>` when the tracker has no branch name.
+The agent never starts on `main`, `master`, or the configured base branch, and
+Symphony does not push automatically. A managed pre-push hook rejects normal
+pushes to those protected branches while allowing the ticket branch; all
+existing Git hooks remain delegated. Local hooks can be bypassed, so configure
+server-side branch protection when protected branches must be immutable. Linear
+and GitHub adapters can reference host environment variables from
+`tracker.provider.api_key` and
 `tracker.provider.token`; those variables are removed from child processes.
 
 Workflow hooks are trusted host shell programs. In particular, the example's

@@ -271,23 +271,20 @@ fn run_worker(definition workflow.WorkflowDefinition, runtime Runtime, issue dom
 		send_failure(definition, events, issue, attempt, started, err.msg())
 		return
 	}
-	space := workspace.prepare_cancelable_sanitized(definition.config.workspace.root,
-		issue.identifier, definition.config.hooks, tracker_secret_names, cancel) or {
+	prepared := prepare_worker_workspace(definition, issue, tracker_secret_names, cancel) or {
 		send_failure(definition, events, issue, attempt, started, err.msg())
 		return
 	}
-	workspace.run_before_cancelable_sanitized(space, definition.config.hooks, tracker_secret_names,
-		cancel) or {
-		workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
-		send_failure(definition, events, issue, attempt, started, err.msg())
-		return
-	}
+	space := prepared.space
+	prepared_branch := prepared.branch
 	prompt_attempt := if attempt == 0 { -1 } else { attempt }
 	rendered := prompt.render(definition.prompt_template, issue, prompt_attempt) or {
 		workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
 		send_failure(definition, events, issue, attempt, started, err.msg())
 		return
 	}
+	workspace_prompt := prepend_workspace_git_policy(rendered, prepared_branch,
+		definition.config.workspace.base_branch)
 	result := codex.run_session_observed(codex.ClientConfig{
 		command:                  definition.config.codex.command
 		cwd:                      space.path
@@ -298,7 +295,7 @@ fn run_worker(definition workflow.WorkflowDefinition, runtime Runtime, issue dom
 		turn_timeout_ms:          definition.config.codex.turn_timeout_ms
 		stall_timeout_ms:         definition.config.codex.stall_timeout_ms
 		secret_environment_names: tracker_secret_names
-	}, rendered, codex.SessionPolicy{
+	}, workspace_prompt, codex.SessionPolicy{
 		max_turns:           definition.config.agent.max_turns
 		continuation_prompt: 'Continue working on the same issue in this existing thread. Re-check the task state, complete the remaining work, and run the relevant verification.'
 	}, cancel, fn [definition, issue] (_ int) bool {
@@ -335,6 +332,42 @@ fn run_worker(definition workflow.WorkflowDefinition, runtime Runtime, issue dom
 	}
 }
 
+struct PreparedWorkerWorkspace {
+	space  workspace.Workspace
+	branch string
+}
+
+fn prepare_worker_workspace(definition workflow.WorkflowDefinition, issue domain.Issue, tracker_secret_names []string, cancel chan bool) !PreparedWorkerWorkspace {
+	space := workspace.prepare_cancelable_sanitized(definition.config.workspace.root,
+		issue.identifier, definition.config.hooks, tracker_secret_names, cancel)!
+	workspace.prepare_issue_branch_cancelable_sanitized(space, issue, definition.config.workspace,
+		tracker_secret_names, cancel) or {
+		workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
+		return err
+	}
+	workspace.run_before_cancelable_sanitized(space, definition.config.hooks, tracker_secret_names,
+		cancel) or {
+		workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
+		return err
+	}
+	branch := workspace.prepare_issue_branch_cancelable_sanitized(space, issue,
+		definition.config.workspace, tracker_secret_names, cancel) or {
+		workspace.run_after_sanitized(space, definition.config.hooks, tracker_secret_names)
+		return err
+	}
+	return PreparedWorkerWorkspace{
+		space:  space
+		branch: branch
+	}
+}
+
+fn prepend_workspace_git_policy(rendered string, branch string, base_branch string) string {
+	if branch == '' {
+		return rendered
+	}
+	return 'Git workspace policy:\n- Work only on the prepared issue branch `${branch}`.\n- Do not switch to, commit on, or push the protected base branch `${base_branch}`, `main`, or `master`.\n- Do not push any branch unless the issue or workflow explicitly requires it.\n\n${rendered}'
+}
+
 fn emit_session(definition workflow.WorkflowDefinition, event string, issue domain.Issue, attempt int, update domain.SessionUpdate) {
 	client := tracker.new_adapter(definition.config.tracker) or { return }
 	observability.emit(observability.Record{
@@ -361,11 +394,7 @@ fn issue_still_active_and_routable(definition workflow.WorkflowDefinition, issue
 }
 
 fn send_failure(definition workflow.WorkflowDefinition, events chan WorkerEvent, issue domain.Issue, attempt int, started time.Time, message string) {
-	kind := if message.contains('hook_canceled') {
-		domain.AttemptOutcomeKind.canceled
-	} else {
-		domain.AttemptOutcomeKind.failed
-	}
+	kind := failure_outcome_kind(message)
 	events <- WorkerEvent{
 		definition: definition
 		issue:      issue
@@ -377,6 +406,13 @@ fn send_failure(definition workflow.WorkflowDefinition, events chan WorkerEvent,
 			runtime_seconds: time.since(started).seconds()
 		}
 	}
+}
+
+fn failure_outcome_kind(message string) domain.AttemptOutcomeKind {
+	if message.contains('hook_canceled') || message.contains('workspace_git_canceled') {
+		return .canceled
+	}
+	return .failed
 }
 
 fn handle_worker_event(runtime Runtime, event WorkerEvent, mut cancellations map[string]chan bool, mut remove_after_finish map[string]bool) {

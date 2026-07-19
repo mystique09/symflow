@@ -30,7 +30,8 @@ pub:
 
 pub struct WorkspaceConfig {
 pub:
-	root string
+	root        string
+	base_branch string = 'main'
 }
 
 pub struct HooksConfig {
@@ -119,7 +120,12 @@ fn normalize_config(raw Config, workflow_dir string, mode ValidationMode) !Confi
 			interval_ms: raw.polling.interval_ms
 		}
 		workspace: WorkspaceConfig{
-			root: workspace_root
+			root:        workspace_root
+			base_branch: if raw.workspace.base_branch.trim_space() == '' {
+				'main'
+			} else {
+				raw.workspace.base_branch.trim_space()
+			}
 		}
 		hooks:     raw.hooks
 		agent:     AgentConfig{

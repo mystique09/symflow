@@ -213,3 +213,51 @@ fn test_failed_live_reload_keeps_last_known_good_definition() {
 	assert decision.error_message.contains('unsupported_tracker_kind')
 	assert decision.definition.prompt_template == 'current prompt'
 }
+
+fn test_workspace_git_policy_keeps_the_agent_off_protected_branches() {
+	prompt := prepend_workspace_git_policy('Implement the ticket.', 'feature/ops-42', 'staging')
+
+	assert prompt.contains('Work only on the prepared issue branch `feature/ops-42`')
+	assert prompt.contains('protected base branch `staging`, `main`, or `master`')
+	assert prompt.contains('Do not push any branch unless the issue or workflow explicitly requires it')
+	assert prompt.ends_with('Implement the ticket.')
+	assert prepend_workspace_git_policy('Plain prompt.', '', 'main') == 'Plain prompt.'
+}
+
+fn test_workspace_git_cancellation_is_not_retried_as_a_failure() {
+	assert failure_outcome_kind('workspace_git_canceled: branch preparation was canceled') == .canceled
+	assert failure_outcome_kind('hook_canceled: hook was canceled') == .canceled
+	assert failure_outcome_kind('workspace_git_error: checkout failed') == .failed
+}
+
+fn test_worker_workspace_revalidates_the_issue_branch_after_before_run() {
+	root := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			workspace: workflow.WorkspaceConfig{
+				root:        root
+				base_branch: 'main'
+			}
+			hooks:     workflow.HooksConfig{
+				after_create: 'git init -b main && git config user.name "Symphony Test" && git config user.email "symphony@example.test" && printf main > marker.txt && git add marker.txt && git commit -m main && git branch feature/ops-42'
+				before_run:   'git switch main'
+				timeout_ms:   5_000
+			}
+		}
+	}
+	cancel := chan bool{}
+	prepared := prepare_worker_workspace(definition, domain.Issue{
+		id:          'issue-42'
+		identifier:  'OPS-42'
+		branch_name: 'feature/ops-42'
+	}, []string{}, cancel)!
+	command := 'git -C ${os.quoted_path(prepared.space.path)} branch --show-current'
+	result := os.execute(command)
+
+	assert result.exit_code == 0
+	assert result.output.trim_space() == 'feature/ops-42'
+	assert prepared.branch == 'feature/ops-42'
+}

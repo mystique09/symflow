@@ -24,6 +24,7 @@ fn test_markdown_only_workflow_uses_defaults() {
 	assert definition.config.tracker.active_states == ['Todo', 'In Progress']
 	assert definition.config.workspace.root == os.real_path(os.join_path(os.temp_dir(),
 		'symphony_workspaces'))
+	assert definition.config.workspace.base_branch == 'main'
 }
 
 fn test_front_matter_decodes_and_resolves_relative_workspace() {
@@ -33,7 +34,7 @@ fn test_front_matter_decodes_and_resolves_relative_workspace() {
 	}
 	path := os.join_path(dir, 'WORKFLOW.md')
 	os.write_file(path,
-		'---\ntracker:\n  kind: linear\n  provider:\n    project_slug: demo\n    endpoint: https://linear.test/graphql\n    extension:\n      enabled: true\npolling:\n  interval_ms: 2500\nworkspace:\n  root: ./runs\nserver:\n  port: 9191\n---\nHello') or {
+		'---\ntracker:\n  kind: linear\n  provider:\n    project_slug: demo\n    endpoint: https://linear.test/graphql\n    extension:\n      enabled: true\npolling:\n  interval_ms: 2500\nworkspace:\n  root: ./runs\n  base_branch: staging\nserver:\n  port: 9191\n---\nHello') or {
 		panic(err)
 	}
 	definition := load(path, .syntax) or { panic(err) }
@@ -48,6 +49,7 @@ fn test_front_matter_decodes_and_resolves_relative_workspace() {
 	assert definition.config.codex.approval_policy == 'never'
 	assert definition.config.codex.turn_sandbox_policy == 'workspaceWrite'
 	assert definition.config.workspace.root == os.real_path(os.join_path(os.real_path(dir), 'runs'))
+	assert definition.config.workspace.base_branch == 'staging'
 }
 
 fn test_file_tracker_root_resolves_relative_to_workflow() {
