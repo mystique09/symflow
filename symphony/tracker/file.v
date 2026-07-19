@@ -11,7 +11,8 @@ const max_ticket_files = 10_000
 
 // FileClient reads provider-neutral issues from a bounded Markdown directory.
 pub struct FileClient {
-	root string
+	root            string
+	terminal_states []string
 }
 
 struct FileBlocker {
@@ -52,6 +53,11 @@ struct ParsedFileTicket {
 
 // new_file_client validates and resolves a local ticket directory.
 pub fn new_file_client(root string) !FileClient {
+	return new_file_client_with_terminal_states(root, ['Closed', 'Cancelled', 'Canceled', 'Duplicate',
+		'Done'])
+}
+
+fn new_file_client_with_terminal_states(root string, terminal_states []string) !FileClient {
 	trimmed := root.trim_space()
 	if trimmed == '' {
 		return error('file_tracker_config_error: tracker.provider.root is required')
@@ -61,7 +67,8 @@ pub fn new_file_client(root string) !FileClient {
 		return error('file_tracker_directory_error: `${resolved}` is not a readable directory')
 	}
 	return FileClient{
-		root: resolved
+		root:            resolved
+		terminal_states: terminal_states.clone()
 	}
 }
 
@@ -76,7 +83,7 @@ pub fn (client FileClient) fetch_issues_by_states(states []string) ![]domain.Iss
 	for ticket in snapshot {
 		if ticket.metadata.dispatch_status == 'pending'
 			&& domain.normalize_name(ticket.metadata.state) in wanted {
-			issues << issue_from_file_ticket(ticket)
+			issues << issue_from_file_ticket(ticket, client.terminal_states)
 		}
 	}
 	return issues
@@ -90,7 +97,7 @@ pub fn (client FileClient) fetch_issues_by_ids(ids []string) ![]domain.Issue {
 	snapshot := client.load_snapshot()!
 	mut by_id := map[string]domain.Issue{}
 	for ticket in snapshot {
-		by_id[ticket.metadata.id] = issue_from_file_ticket(ticket)
+		by_id[ticket.metadata.id] = issue_from_file_ticket(ticket, client.terminal_states)
 	}
 	mut issues := []domain.Issue{}
 	mut seen := map[string]bool{}
@@ -296,7 +303,7 @@ fn validate_file_metadata(filename string, metadata FileTicketMetadata) ! {
 	}
 }
 
-fn issue_from_file_ticket(ticket ParsedFileTicket) domain.Issue {
+fn issue_from_file_ticket(ticket ParsedFileTicket, terminal_states []string) domain.Issue {
 	metadata := ticket.metadata
 	mut blockers := []domain.BlockerRef{}
 	for blocker in metadata.blocked_by {
@@ -308,7 +315,7 @@ fn issue_from_file_ticket(ticket ParsedFileTicket) domain.Issue {
 			updated_at: blocker.updated_at
 		}
 	}
-	return domain.Issue{
+	mut issue := domain.Issue{
 		id:           metadata.id
 		identifier:   metadata.identifier
 		title:        metadata.title
@@ -327,4 +334,10 @@ fn issue_from_file_ticket(ticket ParsedFileTicket) domain.Issue {
 		}
 		dispatchable: metadata.dispatch_status == 'pending'
 	}
+	issue = domain.Issue{
+		...issue
+		dispatchable: issue.dispatchable
+			&& (issue.normalized_state() != 'todo' || !issue.has_open_blockers(terminal_states))
+	}
+	return issue
 }

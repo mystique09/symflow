@@ -23,7 +23,7 @@ pub fn new_adapter(config workflow.TrackerConfig) !Tracker {
 
 fn file_from_config(config workflow.TrackerConfig) !FileClient {
 	root := provider_string(config.provider, 'root')!
-	return new_file_client(root)
+	return new_file_client_with_terminal_states(root, config.terminal_states)
 }
 
 fn linear_from_config(config workflow.TrackerConfig) !LinearClient {

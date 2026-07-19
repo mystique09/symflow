@@ -61,6 +61,11 @@ The accepted dispatch statuses are:
 - `completed`: retained for history and never dispatched;
 - `blocked`: retained for operator attention and never dispatched.
 
+Pending Todo tickets are dispatchable only when every `blocked_by` entry is in
+one of `tracker.terminal_states`. A blank blocker state is treated as unresolved
+and prevents dispatch. Blockers remain informational for later workflow states,
+matching the Linear adapter's routing policy.
+
 An operator can populate `tickets/` with a provider export. Original state,
 labels, descriptions, comments, relations, assignees, and source URLs can be
 retained for context. The runtime does not synchronize these files back to the

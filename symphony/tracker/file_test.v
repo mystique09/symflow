@@ -57,6 +57,35 @@ fn test_file_client_id_refresh_returns_each_requested_ticket_once() {
 	assert issues.map(it.identifier) == ['SYM-400']
 }
 
+fn test_file_client_marks_todo_with_open_or_unknown_blockers_not_dispatchable() {
+	dir := file_tracker_test_dir()
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	open_path := write_file_ticket(dir, 'SYM-400.md', 'opaque-400', 'SYM-400', 'Todo', 'pending',
+		'Open blocker')!
+	unknown_path := write_file_ticket(dir, 'SYM-401.md', 'opaque-401', 'SYM-401', 'Todo',
+		'pending', 'Unknown blocker state')!
+	terminal_path := write_file_ticket(dir, 'SYM-402.md', 'opaque-402', 'SYM-402', 'Todo',
+		'pending', 'Terminal blocker')!
+	set_file_ticket_blocker(open_path, 'In Progress')!
+	set_file_ticket_blocker(unknown_path, '')!
+	set_file_ticket_blocker(terminal_path, 'Done')!
+	client := new_file_client(dir)!
+
+	issues := client.fetch_issues_by_states(['Todo'])!
+	assert issues.map(it.identifier) == ['SYM-400', 'SYM-401', 'SYM-402']
+	assert issues[0].blocked_by.len == 1
+	assert issues[0].blocked_by[0].state == 'In Progress'
+	assert issues[1].blocked_by.len == 1
+	assert issues[1].blocked_by[0].state == ''
+	assert issues[2].blocked_by.len == 1
+	assert issues[2].blocked_by[0].state == 'Done'
+	assert !issues[0].dispatchable
+	assert !issues[1].dispatchable
+	assert issues[2].dispatchable
+}
+
 fn test_file_client_rejects_duplicate_ids() {
 	dir := file_tracker_test_dir()
 	defer {
@@ -107,6 +136,27 @@ fn test_adapter_factory_selects_file_without_tracker_secrets() {
 	assert adapter.secret_environment_names() == []
 	assert adapter.secret_values() == []
 	assert adapter.fetch_issues_by_states(['Todo'])! == []
+}
+
+fn test_file_adapter_uses_configured_terminal_states_for_blockers() {
+	dir := file_tracker_test_dir()
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	path := write_file_ticket(dir, 'SYM-400.md', 'opaque-400', 'SYM-400', 'Todo', 'pending',
+		'Custom terminal blocker')!
+	set_file_ticket_blocker(path, 'Released')!
+	adapter := new_adapter(workflow.TrackerConfig{
+		kind:            'file'
+		provider:        {
+			'root': yaml.Any(dir)
+		}
+		terminal_states: ['Released']
+	})!
+
+	issues := adapter.fetch_issues_by_states(['Todo'])!
+	assert issues.len == 1
+	assert issues[0].dispatchable
 }
 
 fn test_tracker_interface_records_file_completion() {
@@ -204,6 +254,12 @@ fn write_file_ticket(dir string, filename string, id string, identifier string, 
 	content := '---\nschema_version: 1\nid: "${id}"\nidentifier: ${identifier}\ntitle: "Ticket ${identifier}"\nstate: "${state}"\npriority: 2\nlabels:\n  - Bug\n  - rsvp\nbranch_name: "branch/${identifier.to_lower()}"\nsource_url: "https://linear.example/${identifier}"\nassignee_id: "user-1"\nassignee_name: "Benjie"\nparent_identifier: ""\ncreated_at: "2026-07-15T00:00:00Z"\nupdated_at: "2026-07-16T00:00:00Z"\ndispatch_status: ${dispatch_status}\nlast_error: ""\ncompleted_at: ""\nblocked_by: []\n---\n\n${description}\n'
 	os.write_file(path, content)!
 	return path
+}
+
+fn set_file_ticket_blocker(path string, state string) ! {
+	content := os.read_file(path)!
+	blockers := 'blocked_by:\n  - id: "opaque-blocker"\n    identifier: "SYM-399"\n    state: "${state}"\n    created_at: ""\n    updated_at: ""'
+	os.write_file(path, content.replace('blocked_by: []', blockers))!
 }
 
 fn file_tracker_test_dir() string {
