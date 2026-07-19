@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  V_VERSION: f915d3efc4d2f1dfac8189c145c9fc4358b0e71b
+
 on:
   pull_request:
   push:
@@ -20,13 +23,14 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up V
+      - name: Set up and cache V
         uses: vlang/setup-v@v1.7
         with:
-          version-file: .vvmrc
+          version: ${{ env.V_VERSION }}
+          cache: true
 
-      - name: Show V version
-        run: v version
+      - name: Show V diagnostics
+        run: v doctor
 
       - name: Check formatting
         run: v fmt -verify bin symphony
