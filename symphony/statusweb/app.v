@@ -1,5 +1,6 @@
 module statusweb
 
+import encoding.html
 import net
 import net.http
 import net.urllib
@@ -11,6 +12,8 @@ import symphony.observability
 import symphony.orchestrator
 
 const response_entry_limit = 1_000
+const bulma_stylesheet = $embed_file('assets/bulma.min.css', .zlib)
+const symphony_stylesheet = $embed_file('assets/symphony.css', .zlib)
 
 pub struct ServerConfig {
 pub:
@@ -133,6 +136,49 @@ pub:
 	coalesced    bool
 	requested_at string
 	operations   []string
+}
+
+struct DashboardView {
+pub:
+	generated_at     string
+	generated_at_iso string
+	runtime_seconds  string
+	total_tokens     string
+	rate_used        string
+	rate_reset       string
+	rate_reset_iso   string
+	running          []DashboardRunningRow
+	retrying         []DashboardRetryingRow
+	blocked          []DashboardBlockedRow
+}
+
+struct DashboardRunningRow {
+pub:
+	issue_identifier string
+	issue_url        string
+	state            string
+	attempt          int
+	turn_count       int
+	last_event       string
+	tokens           string
+}
+
+struct DashboardRetryingRow {
+pub:
+	issue_identifier string
+	issue_url        string
+	attempt          int
+	due_at           string
+	last_error       string
+}
+
+struct DashboardBlockedRow {
+pub:
+	issue_identifier string
+	issue_url        string
+	state            string
+	attempt          int
+	reason           string
 }
 
 pub fn find_issue(snapshot domain.RuntimeSnapshot, issue_id string) !IssueStatus {
@@ -288,7 +334,20 @@ pub fn (mut app App) init_server(server &veb.Server) {
 }
 
 pub fn (app &App) index(mut ctx Context) veb.Result {
-	return ctx.html(dashboard_html(api_snapshot(app.runtime.snapshot(time.now().unix_milli()))))
+	view := dashboard_view(api_snapshot(app.runtime.snapshot(time.now().unix_milli())))
+	return $veb.html()
+}
+
+@['/assets/bulma.min.css']
+pub fn (app &App) bulma_css(mut ctx Context) veb.Result {
+	_ = app
+	return ctx.send_response_to_client('text/css', bulma_stylesheet.to_string())
+}
+
+@['/assets/symphony.css']
+pub fn (app &App) symphony_css(mut ctx Context) veb.Result {
+	_ = app
+	return ctx.send_response_to_client('text/css', symphony_stylesheet.to_string())
 }
 
 @['/healthz']
@@ -385,6 +444,68 @@ pub fn serve(runtime orchestrator.Runtime, refresh chan bool, stop chan bool, co
 	)!
 }
 
+fn dashboard_view(snapshot domain.RuntimeSnapshot) DashboardView {
+	generated_at := format_millis(snapshot.generated_at)
+	rate_reset := format_millis(snapshot.rate_limit.resets_at)
+	return DashboardView{
+		generated_at:     if generated_at == '' { 'Awaiting first snapshot' } else { generated_at }
+		generated_at_iso: generated_at
+		runtime_seconds:  '${snapshot.runtime_secs:.1f}s'
+		total_tokens:     compact_number(snapshot.tokens.total)
+		rate_used:        '${snapshot.rate_limit.used_percent}%'
+		rate_reset:       if rate_reset == '' { 'Not reported' } else { rate_reset }
+		rate_reset_iso:   rate_reset
+		running:          snapshot.running.map(DashboardRunningRow{
+			issue_identifier: issue_label(it.issue_identifier)
+			issue_url:        sanitized_issue_url(it.issue_url)
+			state:            display_text(it.state)
+			attempt:          it.attempt
+			turn_count:       it.turn_count
+			last_event:       display_text(it.last_event)
+			tokens:           compact_number(it.tokens.total)
+		})
+		retrying:         snapshot.retrying.map(DashboardRetryingRow{
+			issue_identifier: issue_label(it.issue_identifier)
+			issue_url:        sanitized_issue_url(it.issue_url)
+			attempt:          it.attempt
+			due_at:           display_text_or(format_millis(it.due_at_ms), 'Not scheduled')
+			last_error:       display_text(bounded(it.error_message, 2_048))
+		})
+		blocked:          snapshot.blocked.map(DashboardBlockedRow{
+			issue_identifier: issue_label(it.issue_identifier)
+			issue_url:        sanitized_issue_url(it.issue_url)
+			state:            display_text(it.state)
+			attempt:          it.attempt
+			reason:           display_text(bounded(it.reason, 2_048))
+		})
+	}
+}
+
+fn issue_label(value string) string {
+	return display_text_or(value, 'Unknown issue')
+}
+
+fn sanitized_issue_url(value string) string {
+	return if safe_issue_url(value) { html.escape(value) } else { '' }
+}
+
+fn display_text(value string) string {
+	return display_text_or(value, '—')
+}
+
+fn display_text_or(value string, fallback string) string {
+	visible := if value.trim_space() == '' { fallback } else { value }
+	return html.escape(visible)
+}
+
+fn safe_issue_url(value string) bool {
+	if value == '' || value != value.trim_space() {
+		return false
+	}
+	parsed := urllib.parse(value) or { return false }
+	return parsed.scheme in ['https', 'http'] && parsed.host.trim_space() != ''
+}
+
 pub fn resolve_port(host string, requested int) !int {
 	if requested != 0 {
 		return requested
@@ -406,156 +527,6 @@ fn stop_when_requested(server_ready chan &veb.Server, stop chan bool) {
 	server.shutdown(timeout: 5 * time.second) or {}
 }
 
-fn dashboard_html(snapshot domain.RuntimeSnapshot) string {
-	mut body := strings.new_builder(24_576)
-	body.write_string('<!doctype html><html lang="en" data-theme="paper-ops"><head>')
-	body.write_string('<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">')
-	body.write_string('<meta name="color-scheme" content="light"><title>Symphony · Orchestration overview</title>')
-	write_dashboard_styles(mut body)
-	body.write_string('</head><body><main class="page-shell">')
-	write_dashboard_header(mut body, snapshot)
-	write_dashboard_metrics(mut body, snapshot)
-	write_running_section(mut body, snapshot.running)
-	write_retrying_section(mut body, snapshot.retrying)
-	write_blocked_section(mut body, snapshot.blocked)
-	body.write_string('<footer>Symphony engineering preview · local orchestration status</footer>')
-	body.write_string('</main></body></html>')
-	return body.str()
-}
-
-fn write_dashboard_styles(mut body strings.Builder) {
-	body.write_string('<style>:root{--canvas:#f4f0e7;--surface:#fffaf1;--surface-strong:#fffdf8;--navy:#18324b;--muted:#687783;--line:#ddd5c6;--running:#2f765c;--running-soft:#dcebe3;--retrying:#9a6421;--retrying-soft:#f6e8cb;--blocked:#a64343;--blocked-soft:#f4dddd;--shadow:0 12px 34px rgba(62,49,32,.08);--radius:18px}*{box-sizing:border-box}html{background:var(--canvas)}body{margin:0;background:linear-gradient(180deg,#f8f4ec 0,var(--canvas) 24rem);color:var(--navy);font:15px/1.55 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:inherit}a:focus-visible{outline:3px solid #4c7e9f;outline-offset:3px}.page-shell{width:min(1180px,calc(100% - 32px));margin:0 auto;padding:32px 0 48px}')
-	body.write_string('.topbar,.hero-row,.section-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:850;letter-spacing:-.02em}.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--navy);color:#fffaf1;box-shadow:0 5px 14px rgba(24,50,75,.16)}.live{display:inline-flex;align-items:center;gap:7px;color:var(--running);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.live-dot{width:8px;height:8px;border-radius:50%;background:var(--running);box-shadow:0 0 0 4px rgba(47,118,92,.11)}')
-	body.write_string('.hero{padding:14px 0 4px}.hero-row{align-items:flex-end}.eyebrow{margin:34px 0 9px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}h1{max-width:760px;margin:0;font-size:clamp(34px,5vw,54px);font-weight:850;line-height:1.03;letter-spacing:-.055em}.lede{max-width:640px;margin:12px 0 0;color:var(--muted);font-size:16px}.metadata{display:grid;gap:7px;min-width:245px;padding:15px 17px;border:1px solid var(--line);border-radius:14px;background:rgba(255,250,241,.72);color:var(--muted);font-size:12px}.metadata strong{color:var(--navy);font-weight:750}.metadata-row{display:flex;justify-content:space-between;gap:20px}.metadata time{font-variant-numeric:tabular-nums}')
-	body.write_string('.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:28px 0}.metric,.queue-card{border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow)}.metric{position:relative;overflow:hidden;padding:20px;border-radius:var(--radius)}.metric:before{position:absolute;inset:0 auto 0 0;width:4px;content:""}.metric-running:before{background:var(--running)}.metric-retrying:before{background:var(--retrying)}.metric-blocked:before{background:var(--blocked)}.metric-label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.metric-dot,.queue-dot{width:8px;height:8px;border-radius:50%;background:currentColor}.metric-running .metric-label{color:var(--running)}.metric-retrying .metric-label{color:var(--retrying)}.metric-blocked .metric-label{color:var(--blocked)}.metric-value{display:block;margin-top:5px;font-size:34px;font-weight:850;line-height:1.1;letter-spacing:-.045em}.metric-caption{display:block;margin-top:6px;color:var(--muted);font-size:12px}')
-	body.write_string('.queues{display:grid;gap:16px}.queue-card{overflow:hidden;border-radius:var(--radius)}.section-heading{padding:18px 20px;border-bottom:1px solid var(--line);background:var(--surface-strong)}.section-title{display:flex;align-items:center;gap:9px}.section-heading h2{margin:0;font-size:18px;letter-spacing:-.02em}.queue-running .queue-dot{color:var(--running)}.queue-retrying .queue-dot{color:var(--retrying)}.queue-blocked .queue-dot{color:var(--blocked)}.count{min-width:30px;padding:3px 9px;border-radius:999px;text-align:center;font-size:12px;font-weight:800}.queue-running .count{color:var(--running);background:var(--running-soft)}.queue-retrying .count{color:var(--retrying);background:var(--retrying-soft)}.queue-blocked .count{color:var(--blocked);background:var(--blocked-soft)}')
-	body.write_string('.table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{padding:14px 20px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}tbody tr{transition:background-color .15s ease}tbody tr:hover{background:#fbf6ed}tbody tr:last-child td{border-bottom:0}.issue-reference{font-weight:800;white-space:nowrap}.issue-link{text-decoration-color:#91a0ab;text-decoration-thickness:1px;text-underline-offset:3px}.issue-link:hover{text-decoration-color:currentColor}.status{display:inline-flex;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:800;white-space:nowrap}.status-running{color:var(--running);background:var(--running-soft)}.status-retrying{color:var(--retrying);background:var(--retrying-soft)}.status-blocked{color:var(--blocked);background:var(--blocked-soft)}.numeric{font-variant-numeric:tabular-nums}.message{max-width:38rem;overflow-wrap:anywhere;color:var(--muted)}.empty{padding:32px 20px;text-align:center;color:var(--muted)}footer{padding-top:26px;color:var(--muted);font-size:12px;text-align:center}')
-	body.write_string('@media(max-width:860px){.hero-row{align-items:flex-start;flex-direction:column}.metadata{width:100%;min-width:0}.metrics{grid-template-columns:repeat(3,1fr)}}@media(max-width:640px){.page-shell{width:min(100% - 20px,1180px);padding-top:18px}.topbar{align-items:flex-start}.live{margin-top:8px}.eyebrow{margin-top:28px}.metrics{grid-template-columns:1fr}.metric{padding:17px}.metadata-row{gap:12px}.section-heading{padding:15px 14px}th,td{padding:12px 14px}h1{font-size:36px}}@media(prefers-reduced-motion:reduce){tbody tr{transition:none}}</style>')
-}
-
-fn write_dashboard_header(mut body strings.Builder, snapshot domain.RuntimeSnapshot) {
-	generated_at := format_millis(snapshot.generated_at)
-	reset_at := format_millis(snapshot.rate_limit.resets_at)
-	body.write_string('<header class="topbar"><div class="brand"><span class="brand-mark" aria-hidden="true">S</span><span>Symphony</span></div>')
-	body.write_string('<div class="live"><span class="live-dot" aria-hidden="true"></span>Service live</div></header>')
-	body.write_string('<section class="hero" aria-labelledby="overview-title"><p class="eyebrow">Local agent operations</p><div class="hero-row"><div>')
-	body.write_string('<h1 id="overview-title">Orchestration overview</h1><p class="lede">Agent activity across the issue queue, from active work through retries and operator blocks.</p></div>')
-	body.write_string('<div class="metadata" aria-label="Runtime metadata">')
-	write_metadata_row(mut body, 'Generated', timestamp_markup(generated_at,
-		'Awaiting first snapshot'))
-	write_metadata_row(mut body, 'Runtime', '<strong>${snapshot.runtime_secs:.1f}s</strong>')
-	write_metadata_row(mut body, 'Tokens',
-		'<strong>${compact_number(snapshot.tokens.total)}</strong>')
-	write_metadata_row(mut body, 'Rate used',
-		'<strong>${snapshot.rate_limit.used_percent}%</strong>')
-	write_metadata_row(mut body, 'Rate reset', timestamp_markup(reset_at, 'Not reported'))
-	body.write_string('</div></div></section>')
-}
-
-fn write_metadata_row(mut body strings.Builder, label string, value_markup string) {
-	body.write_string('<div class="metadata-row"><span>${escape_html(label)}</span>${value_markup}</div>')
-}
-
-fn timestamp_markup(value string, fallback string) string {
-	if value == '' {
-		return '<strong>${escape_html(fallback)}</strong>'
-	}
-	escaped := escape_html(value)
-	return '<time datetime="${escaped}"><strong>${escaped}</strong></time>'
-}
-
-fn write_dashboard_metrics(mut body strings.Builder, snapshot domain.RuntimeSnapshot) {
-	body.write_string('<section class="metrics" aria-label="Queue totals">')
-	write_metric(mut body, 'running', 'Running', snapshot.running.len, 'Agents working now')
-	write_metric(mut body, 'retrying', 'Retrying', snapshot.retrying.len,
-		'Attempts waiting to resume')
-	write_metric(mut body, 'blocked', 'Blocked', snapshot.blocked.len, 'Issues needing attention')
-	body.write_string('</section><div class="queues">')
-}
-
-fn write_metric(mut body strings.Builder, kind string, label string, value int, caption string) {
-	body.write_string('<article class="metric metric-${kind}"><span class="metric-label"><span class="metric-dot" aria-hidden="true"></span>${escape_html(label)}</span>')
-	body.write_string('<strong class="metric-value">${value}</strong><span class="metric-caption">${escape_html(caption)}</span></article>')
-}
-
-fn write_running_section(mut body strings.Builder, entries []domain.RunningSnapshot) {
-	write_section_start(mut body, 'running', 'Running', entries.len)
-	body.write_string('<div class="table-scroll"><table aria-label="Running issues"><thead><tr><th>Issue</th><th>Status</th><th>State</th><th>Attempt</th><th>Turns</th><th>Last event</th><th>Tokens</th></tr></thead><tbody>')
-	if entries.len == 0 {
-		write_empty_row(mut body, 7, 'No agents are running right now.')
-	} else {
-		for entry in entries {
-			body.write_string('<tr><td>${issue_reference(entry.issue_identifier, entry.issue_url)}</td><td><span class="status status-running">Running</span></td>')
-			body.write_string('<td>${display_value(entry.state)}</td><td class="numeric">${entry.attempt}</td><td class="numeric">${entry.turn_count}</td>')
-			body.write_string('<td class="message">${display_value(entry.last_event)}</td><td class="numeric">${compact_number(entry.tokens.total)}</td></tr>')
-		}
-	}
-	body.write_string('</tbody></table></div></section>')
-}
-
-fn write_retrying_section(mut body strings.Builder, entries []domain.RetrySnapshot) {
-	write_section_start(mut body, 'retrying', 'Retrying', entries.len)
-	body.write_string('<div class="table-scroll"><table aria-label="Retrying issues"><thead><tr><th>Issue</th><th>Status</th><th>Attempt</th><th>Due</th><th>Last error</th></tr></thead><tbody>')
-	if entries.len == 0 {
-		write_empty_row(mut body, 5, 'No retries are queued.')
-	} else {
-		for entry in entries {
-			body.write_string('<tr><td>${issue_reference(entry.issue_identifier, entry.issue_url)}</td><td><span class="status status-retrying">Retrying</span></td>')
-			body.write_string('<td class="numeric">${entry.attempt}</td><td>${timestamp_markup(format_millis(entry.due_at_ms),
-				'Not scheduled')}</td><td class="message">${display_value(bounded(entry.error_message,
-				2_048))}</td></tr>')
-		}
-	}
-	body.write_string('</tbody></table></div></section>')
-}
-
-fn write_blocked_section(mut body strings.Builder, entries []domain.BlockedSnapshot) {
-	write_section_start(mut body, 'blocked', 'Blocked', entries.len)
-	body.write_string('<div class="table-scroll"><table aria-label="Blocked issues"><thead><tr><th>Issue</th><th>Status</th><th>State</th><th>Attempt</th><th>Reason</th></tr></thead><tbody>')
-	if entries.len == 0 {
-		write_empty_row(mut body, 5, 'No issues are blocked.')
-	} else {
-		for entry in entries {
-			body.write_string('<tr><td>${issue_reference(entry.issue_identifier, entry.issue_url)}</td><td><span class="status status-blocked">Blocked</span></td>')
-			body.write_string('<td>${display_value(entry.state)}</td><td class="numeric">${entry.attempt}</td><td class="message">${display_value(bounded(entry.reason,
-				2_048))}</td></tr>')
-		}
-	}
-	body.write_string('</tbody></table></div></section></div>')
-}
-
-fn write_section_start(mut body strings.Builder, kind string, label string, count int) {
-	body.write_string('<section class="queue-card queue-${kind}" aria-labelledby="${kind}-heading"><div class="section-heading"><div class="section-title">')
-	body.write_string('<span class="queue-dot" aria-hidden="true"></span><h2 id="${kind}-heading">${escape_html(label)}</h2></div><span class="count">${count}</span></div>')
-}
-
-fn write_empty_row(mut body strings.Builder, column_count int, message string) {
-	body.write_string('<tr><td class="empty" colspan="${column_count}">${escape_html(message)}</td></tr>')
-}
-
-fn issue_reference(identifier string, issue_url string) string {
-	label := escape_html(if identifier.trim_space() == '' { 'Unknown issue' } else { identifier })
-	if safe_issue_url(issue_url) {
-		return '<a class="issue-reference issue-link" href="${escape_html(issue_url)}" target="_blank" rel="noreferrer">${label}</a>'
-	}
-	return '<span class="issue-reference">${label}</span>'
-}
-
-fn safe_issue_url(value string) bool {
-	if value == '' || value != value.trim_space() {
-		return false
-	}
-	parsed := urllib.parse(value) or { return false }
-	return parsed.scheme in ['https', 'http'] && parsed.host.trim_space() != ''
-}
-
-fn display_value(value string) string {
-	if value.trim_space() == '' {
-		return '<span aria-label="Not available">—</span>'
-	}
-	return escape_html(value)
-}
-
 fn compact_number(value i64) string {
 	raw := value.str()
 	start := if raw.starts_with('-') { 1 } else { 0 }
@@ -570,11 +541,6 @@ fn compact_number(value i64) string {
 		result.write_u8(raw[index])
 	}
 	return result.str()
-}
-
-fn escape_html(value string) string {
-	return value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"',
-		'&quot;').replace("'", '&#39;')
 }
 
 fn bounded(value string, limit int) string {

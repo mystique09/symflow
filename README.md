@@ -52,7 +52,7 @@ symphony/workspace/   path safety and lifecycle hooks
 symphony/tracker/     tracker seam plus file, Linear, and GitHub adapters
 symphony/codex/       app-server JSONL protocol and process supervision
 symphony/orchestrator single-authority runtime state
-symphony/statusweb/   optional loopback veb status surface
+symphony/statusweb/   optional loopback veb templates and local web assets
 symphony/app/         CLI and dependency composition
 ```
 
@@ -121,6 +121,13 @@ The web surface provides a small dashboard at `/`, plus `GET /healthz`, `GET /ap
 `GET /api/v1/<issue-identifier>`, and `POST /api/v1/refresh`. Refresh causes an immediate
 poll and releases operator-blocked claims. The default bind address is
 `127.0.0.1`; a non-loopback `--web-host` is explicit and logs a warning.
+
+The dashboard is rendered from `symphony/statusweb/templates/index.html` using
+`veb`'s compile-time template support. Bulma 1.0.4 and the Symphony theme are
+vendored under `symphony/statusweb/assets` and embedded into the executable, so
+opening the dashboard makes no stylesheet request to a public CDN and a copied
+binary does not need an adjacent asset folder. Bulma's MIT license is vendored
+beside the minified stylesheet.
 
 `SIGINT` and `SIGTERM` stop dispatch, cancel active Codex process groups, wait
 for bounded worker cleanup, and stop the optional web server.

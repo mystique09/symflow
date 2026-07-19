@@ -5,15 +5,15 @@ Date: 2026-07-19
 ## Goal
 
 Replace the status dashboard's minimal presentation with a polished, responsive
-Paper Ops visual system. The dashboard remains a dependency-free,
-server-rendered page produced by V and `veb`.
+Paper Ops visual system. The dashboard remains a server-rendered page produced
+by V and `veb`, with Bulma vendored locally as its CSS foundation.
 
 ## Scope
 
 The change is limited to the human dashboard returned by `GET /`. Existing
 JSON routes, refresh behavior, orchestration state, and runtime semantics remain
-unchanged. The page does not load external fonts, stylesheets, images, scripts,
-or frameworks.
+unchanged. The page does not make runtime requests for external fonts,
+stylesheets, images, scripts, or frameworks.
 
 ## Visual direction
 
@@ -34,15 +34,17 @@ The page contains:
 
 ## Architecture
 
-`symphony/statusweb/app.v` continues to own the HTML response. The renderer is
-split into focused private helpers for the page shell, metadata, metrics, queue
-sections, issue links, and empty rows so the main renderer remains readable.
-All issue-supplied strings and URLs are HTML-escaped before interpolation.
+`symphony/statusweb/app.v` builds a presentation-only view model and returns the
+compile-time `veb` template at `symphony/statusweb/templates/index.html`. All
+issue-supplied strings are HTML-escaped before interpolation, and issue links
+are restricted to absolute HTTP(S) URLs.
 
-CSS is embedded in the page head. CSS custom properties define the color,
-spacing, radius, and shadow tokens. The layout uses CSS Grid and normal table
-semantics; narrow screens receive stacked summary cards and horizontally
-scrollable tables.
+The page uses Bulma 1.0.4 from the vendored `assets/bulma.min.css`, followed by
+the local Paper Ops overrides in `assets/symphony.css`. Both stylesheets are
+embedded at compile time and served by dedicated `veb` routes, so the dashboard
+does not depend on CDN availability or asset paths from the build machine. CSS
+custom properties define the visual tokens, while Bulma provides the responsive
+columns, boxes, tags, and table primitives.
 
 ## Data presentation
 
@@ -78,5 +80,5 @@ test suite, vet, and a production build.
 - No changes to the JSON API or refresh endpoint.
 - No auto-refresh or client-side state management.
 - No theme switcher or dark theme.
-- No external asset pipeline or frontend framework.
+- No external asset pipeline or runtime CDN dependency.
 - No tracker, scheduler, or orchestrator changes.

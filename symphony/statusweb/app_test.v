@@ -59,75 +59,6 @@ fn test_try_refresh_is_non_blocking_when_service_is_unavailable() {
 	assert !try_refresh(refresh)
 }
 
-fn test_dashboard_html_renders_paper_ops_status_sections() {
-	snapshot := domain.RuntimeSnapshot{
-		generated_at: 1_750_000_000_000
-		running:      [
-			domain.RunningSnapshot{
-				issue_id:         'issue-1'
-				issue_identifier: 'SYM-42'
-				issue_url:        'https://linear.app/acme/issue/SYM-42'
-				state:            'In Progress'
-				attempt:          2
-				turn_count:       4
-				last_event:       'turn/completed'
-				tokens:           domain.TokenTotals{
-					total: 1_240
-				}
-			},
-		]
-		retrying:     [
-			domain.RetrySnapshot{
-				issue_id:         'issue-2'
-				issue_identifier: 'SYM-38'
-				attempt:          1
-				due_at_ms:        1_750_000_030_000
-				error_message:    'temporary failure'
-			},
-		]
-		blocked:      [
-			domain.BlockedSnapshot{
-				issue_id:         'issue-3'
-				issue_identifier: 'SYM-19'
-				state:            'Todo'
-				attempt:          1
-				reason:           'approval required'
-			},
-		]
-		tokens:       domain.TokenTotals{
-			total: 1_240
-		}
-	}
-	html := dashboard_html(snapshot)
-	assert html.contains('data-theme="paper-ops"')
-	assert html.contains('Orchestration overview')
-	assert html.contains('class="metric metric-running"')
-	assert html.contains('class="status status-running"')
-	assert html.contains('href="https://linear.app/acme/issue/SYM-42"')
-	assert html.contains('1,240')
-	assert html.contains('SYM-38')
-	assert html.contains('SYM-19')
-}
-
-fn test_dashboard_html_escapes_runtime_content_and_rejects_unsafe_issue_links() {
-	html := dashboard_html(domain.RuntimeSnapshot{
-		running: [
-			domain.RunningSnapshot{
-				issue_identifier: '<script>alert(1)</script>'
-				issue_url:        'javascript:alert(1)'
-				state:            '<b>Todo</b>'
-				last_event:       'event & message'
-			},
-		]
-	})
-	assert !html.contains('<script>alert(1)</script>')
-	assert !html.contains('href="javascript:alert(1)"')
-	assert html.contains('class="issue-reference"')
-	assert html.contains('&lt;script&gt;alert(1)&lt;/script&gt;')
-	assert html.contains('&lt;b&gt;Todo&lt;/b&gt;')
-	assert html.contains('event &amp; message')
-}
-
 fn test_safe_issue_url_requires_an_absolute_http_url_with_a_host() {
 	assert safe_issue_url('https://linear.app/acme/issue/SYM-42')
 	assert safe_issue_url('http://localhost:8080/issues/SYM-42')
@@ -136,23 +67,24 @@ fn test_safe_issue_url_requires_an_absolute_http_url_with_a_host() {
 	assert !safe_issue_url(' https://linear.app/acme/issue/SYM-42')
 }
 
-fn test_dashboard_html_renders_queue_empty_states() {
-	html := dashboard_html(domain.RuntimeSnapshot{})
-	assert html.contains('No agents are running right now.')
-	assert html.contains('No retries are queued.')
-	assert html.contains('No issues are blocked.')
-}
-
 fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	mut listener := net.listen_tcp(.ip, '127.0.0.1:0')!
 	port := int(listener.addr()!.port()!)
 	listener.close()!
-	runtime := orchestrator.start_runtime(1, 60_000)
+	runtime := orchestrator.start_runtime(2, 60_000)
 	assert runtime.claim(domain.Issue{
 		id:         'route-issue'
 		identifier: 'SYM-WEB'
+		url:        'https://example.test/issues/SYM-WEB?source=web&view=full'
 		title:      'Exercise web routes'
 		state:      'Todo'
+	}, 0, time.now().unix_milli())
+	assert runtime.claim(domain.Issue{
+		id:         'unsafe-route-issue'
+		identifier: '<script>alert(1)</script>'
+		url:        'javascript:alert(1)'
+		title:      'Exercise template escaping'
+		state:      '<b>Todo</b>'
 	}, 0, time.now().unix_milli())
 	refresh := chan bool{cap: 1}
 	stop := chan bool{cap: 1}
@@ -163,6 +95,25 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	assert dashboard.status_code == 200
 	assert dashboard.body.contains('Symphony')
 	assert dashboard.body.contains('SYM-WEB')
+	assert dashboard.body.contains('href="https://example.test/issues/SYM-WEB?source=web&amp;view=full"')
+	assert dashboard.body.contains('href="/assets/bulma.min.css"')
+	assert dashboard.body.contains('href="/assets/symphony.css"')
+	assert dashboard.body.contains('<time datetime="')
+	assert dashboard.body.contains('class="section dashboard-shell"')
+	assert dashboard.body.contains('class="table is-fullwidth')
+	assert dashboard.body.contains('No retries are queued.')
+	assert dashboard.body.contains('No issues are blocked.')
+	assert !dashboard.body.contains('<script>alert(1)</script>')
+	assert !dashboard.body.contains('href="javascript:alert(1)"')
+	assert dashboard.body.contains('&lt;script&gt;alert(1)&lt;/script&gt;')
+	assert dashboard.body.contains('&lt;b&gt;Todo&lt;/b&gt;')
+	bulma := http.get('http://127.0.0.1:${port}/assets/bulma.min.css')!
+	assert bulma.status_code == 200
+	assert (bulma.header.get(.content_type) or { '' }) == 'text/css'
+	assert bulma.body.contains('bulma.io')
+	theme := http.get('http://127.0.0.1:${port}/assets/symphony.css')!
+	assert theme.status_code == 200
+	assert (theme.header.get(.content_type) or { '' }) == 'text/css'
 	state_response := http.get('http://127.0.0.1:${port}/api/v1/state')!
 	assert state_response.status_code == 200
 	assert state_response.body.contains('SYM-WEB')
