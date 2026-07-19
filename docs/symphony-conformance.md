@@ -11,7 +11,7 @@ design document and has no corresponding Rust source tree.
 | --- | --- |
 | Workflow file | `symphony/workflow` splits YAML front matter from Markdown, requires an object root, applies typed defaults, resolves paths, preserves arbitrary adapter-owned `tracker.provider` keys, passes schema-owned Codex policy objects through as JSON, reloads on every poll, and retains the last valid effective definition after loader or adapter validation errors. |
 | Runtime prompt | `symphony/prompt` implements bounded strict interpolation, scalar issue fields, labels and blockers, conditionals, loops, and `default`, `lower`, `upper`, and `trim` filters. A first attempt is presented as absent; retry attempts are integers. |
-| Tracker | `symphony/tracker` exposes state-list reads, opaque-ID refreshes, secret metadata, and outcome recording. The default file adapter strictly reads bounded Markdown/YAML tickets, owns durable dispatch status, and atomically records outcomes without tracker credentials or network access. Its profile is in `docs/tracker-file.md`. The optional Linear adapter retains provider-specific config, pagination, normalization, and read-only behavior documented in `docs/tracker-linear.md`. |
+| Tracker | `symphony/tracker` exposes state-list reads, opaque-ID refreshes, secret metadata, and outcome recording. The default file adapter strictly reads bounded Markdown/YAML tickets and atomically records dispatch status. Linear supports exact project or team scope with read-only GraphQL behavior. GitHub Issues supports exact repository scope, explicit status-label normalization, pull-request exclusion, bounded REST pagination, strict refresh, and opt-in terminal outcome labels. Provider profiles are in `docs/tracker-file.md`, `docs/tracker-linear.md`, and `docs/tracker-github.md`. |
 | Eligibility and scheduling | `symphony/scheduler` contains pure active/terminal, required-label, explicit-dispatchability, priority, global-slot, per-state-slot, reconciliation, stall, and exponential-backoff decisions. It contains no Linear semantics. |
 | State authority | `symphony/orchestrator/runtime.v` owns claim, running, retry, blocked, token, runtime, PID, thread, turn, event, message, and rate-limit state in one channel-driven loop. Absolute token reports become positive deltas, and snapshots add active elapsed runtime. |
 | Service loop | `symphony/orchestrator/service.v` reloads configuration, reconciles running issues before dispatch, refreshes due retries by opaque ID, claims eligible candidates, starts bounded workers, performs startup cleanup for terminal issues, and releases missing, inactive, terminal, or unroutable retries. |
@@ -33,6 +33,9 @@ design document and has no corresponding Rust source tree.
   failure outcomes remain pending for normal retry behavior.
 - The optional Linear adapter remains read-only and reports that it did not
   persist completion, preserving the existing continuation semantics.
+- The GitHub adapter is read-only by default. Explicit write mode applies
+  configured success or blocked labels without closing issues and preserves
+  non-status labels.
 - Hooks run with `/bin/bash -lc` on this POSIX implementation.
 - An explicit non-loopback web bind is allowed but produces a structured
   security warning. Authentication and TLS are deployment concerns for this
@@ -42,18 +45,18 @@ design document and has no corresponding Rust source tree.
 
 | Area | Status |
 | --- | --- |
-| Provider-native tracker tools | Linear mutation tools are not advertised. These are optional in the upstream core; the adapter is read-only and unsupported dynamic tool calls receive a failure response. |
+| Provider-native tracker tools | Linear and GitHub mutation tools are not advertised to Codex. GitHub's host-owned outcome labeling is internal to the adapter; unsupported dynamic tool calls receive a failure response. |
 | Durable scheduler state | Claims, retries, and live sessions remain in memory. Database/DBOS durability is an upstream follow-up, not a core requirement. Restart recovery is tracker- and workspace-driven. |
 | Remote workers | The optional SSH worker appendix is not implemented. All workers are local process groups. |
 | Additional log sinks | The conforming NDJSON stderr sink is implemented; configurable file sinks are not shipped. |
-| Live external profile | The credential-free suite uses local Markdown tickets, injected Linear transport for the optional adapter, fake Codex processes, real hooks, and a real loopback server. Live Linear and Codex smoke profiles remain operator-run production validation. |
+| Live external profile | The credential-free suite uses local Markdown tickets, injected Linear and GitHub transports, fake Codex processes, real hooks, and a real loopback server. Live provider and Codex smoke profiles remain operator-run production validation. |
 
 These are explicit scope choices. They are not required by the upstream core
 specification and do not hide a DBOS, Kameo, or Photon dependency.
 
 ## Verification contract
 
-The default verification requires no Linear token and no live Codex service:
+The default verification requires no tracker token and no live Codex service:
 
 ```sh
 v fmt -verify bin symphony
@@ -65,7 +68,7 @@ build/symphony validate WORKFLOW.example.md
 build/symphony doctor WORKFLOW.md
 ```
 
-The tests use temporary Markdown queues, real shell subprocesses, an injected
-Linear HTTP transport for its optional adapter, a fake Codex app-server, and a
-live loopback `veb` server. Live Linear and Codex smoke tests remain opt-in
-operational checks.
+The tests use temporary Markdown queues, real shell subprocesses, injected
+Linear and GitHub HTTP transports, a fake Codex app-server, and a live loopback
+`veb` server. Live provider and Codex smoke tests remain opt-in operational
+checks.

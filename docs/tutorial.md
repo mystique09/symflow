@@ -112,6 +112,41 @@ ticket to `completed`, and a ticket needing operator input to `blocked`. Failed
 attempts stay pending and use the configured retry backoff. See
 [the file tracker reference](tracker-file.md) for the complete schema.
 
+### Use Linear or GitHub instead
+
+The local file queue is the simplest first run, but it is not required. Linear
+can select exactly one project or team, and GitHub can select exactly one
+repository. Keep `SYMPHONY_REPOSITORY_URL` as the clone URL for the code that
+Codex edits; tracker scope is configured separately in `WORKFLOW.md`.
+
+For Linear team scope:
+
+```yaml
+tracker:
+  kind: linear
+  provider:
+    api_key: $LINEAR_API_KEY
+    team_key: ENG
+```
+
+For a read-only GitHub queue:
+
+```yaml
+tracker:
+  kind: github
+  provider:
+    repository: owner/repository
+    token: $GITHUB_TOKEN
+    state_labels:
+      Todo: "status:todo"
+      In Progress: "status:in-progress"
+    closed_state: Closed
+```
+
+See [the Linear profile](tracker-linear.md) and
+[the GitHub Issues profile](tracker-github.md) before enabling a networked
+tracker or GitHub outcome writes.
+
 ## 5. Validate without starting tickets
 
 These commands do not dispatch any Codex workers:

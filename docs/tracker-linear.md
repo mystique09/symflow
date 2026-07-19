@@ -17,8 +17,14 @@ preserved by the workflow loader and ignored by this adapter.
 | --- | --- | --- | --- |
 | `endpoint` | No | `https://api.linear.app/graphql` | Linear GraphQL endpoint. |
 | `api_key` | No | `$LINEAR_API_KEY` | Literal API key or a single `$ENV_NAME` reference. Environment references are recommended. |
-| `project_slug` | Yes | none | Exact Linear project `slugId`; all reads are scoped to this project. |
+| `project_slug` | One scope required | none | Exact Linear project `slugId`; all reads are scoped to this project. |
+| `team_key` | One scope required | none | Exact Linear team key, such as `ENG`; all reads are scoped to this team. |
 | `assignee` | No | empty | Linear user ID. Empty accepts project-routed issues; a value requires an exact assignee-ID match. |
+
+Configure exactly one of `project_slug` or `team_key`. Existing project-scoped
+workflows retain their meaning. A workspace URL slug is not a project slug, and
+an issue identifier prefix is display metadata rather than a separate scope.
+For a team whose issues are `ENG-123`, use `team_key: ENG`.
 
 `tracker.required_labels`, `tracker.active_states`, and
 `tracker.terminal_states` are common Symphony settings, not provider keys. The
@@ -40,10 +46,11 @@ The adapter implements exactly the two required read operations:
 - `fetch_issues_by_ids(issue_ids)`
 
 Empty lists return immediately without configuration validation or a provider
-request. State reads filter by exact project `slugId` and state names, request
-50 issues per page, and follow `pageInfo.endCursor` while rejecting missing or
-repeated cursors. ID refreshes treat input IDs as a set, batch 50 IDs per
-request, preserve input order, and return each found issue at most once.
+request. State reads filter by the configured exact project `slugId` or team
+`key` plus state names, request 50 issues per page, and follow
+`pageInfo.endCursor` while rejecting missing or repeated cursors. ID refreshes
+enforce the same scope, treat input IDs as a set, batch 50 IDs per request,
+preserve input order, and return each found issue at most once.
 
 The current request timeout is 30 seconds, the HTTP response limit is 8 MiB,
 and inverse blocker relations are requested with a limit of 50 per issue.
@@ -89,7 +96,7 @@ V errors use a stable category prefix followed by a human-readable message:
 | Category | Conditions |
 | --- | --- |
 | `unsupported_tracker_kind` | Adapter selection receives a kind other than `linear`. |
-| `invalid_tracker_config` | Endpoint or project slug is missing. |
+| `invalid_tracker_config` | Endpoint is missing, scope is missing or ambiguous, or a provider value has the wrong type. |
 | `missing_tracker_secret` | The literal or resolved API key is empty. |
 | `tracker_request` | DNS, connection, timeout, TLS, or other HTTP transport failure. |
 | `tracker_status` | Non-success HTTP response, including rejected credentials. |

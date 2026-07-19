@@ -4,8 +4,9 @@ This project is a V engineering-preview implementation of OpenAI's
 language-agnostic [Symphony service specification](https://github.com/openai/symphony/blob/main/SPEC.md).
 It polls eligible Markdown tickets from a local directory, prepares one isolated
 workspace per ticket, and supervises Codex app-server processes with bounded
-concurrency. A Linear adapter remains available, but the checked-in workflow
-and ticket queue require no Linear account, API key, or network access.
+concurrency. Optional Linear and GitHub Issues adapters are available, but the
+checked-in workflow and ticket queue require no tracker account, API key, or
+network access.
 
 The Rust design is intentionally documentation-only. The executable here uses V
 threads created with `spawn`, typed channels, `select`, and an optional `veb`
@@ -21,6 +22,7 @@ The product requirements and implementation record are in:
 - `docs/symphony-conformance.md`
 - `docs/tracker-file.md` — local ticket format, lifecycle, and recovery
 - `docs/tracker-linear.md` — optional Linear adapter contract
+- `docs/tracker-github.md` — repository-scoped GitHub Issues adapter contract
 - `docs/tutorial.md` — beginner setup, including the exact meaning of
   `SYMPHONY_REPOSITORY_URL`
 
@@ -47,7 +49,7 @@ symphony/workflow/    WORKFLOW.md parsing and typed config
 symphony/prompt/      strict runtime prompt renderer
 symphony/scheduler/   pure dispatch and reconciliation policy
 symphony/workspace/   path safety and lifecycle hooks
-symphony/tracker/     tracker seam plus file and optional Linear adapters
+symphony/tracker/     tracker seam plus file, Linear, and GitHub adapters
 symphony/codex/       app-server JSONL protocol and process supervision
 symphony/orchestrator single-authority runtime state
 symphony/statusweb/   optional loopback veb status surface
@@ -88,8 +90,9 @@ Successful attempts are changed atomically to `completed`; blocked attempts are
 changed to `blocked`. See [the file tracker guide](docs/tracker-file.md).
 
 `workspace.root` is also resolved relative to `WORKFLOW.md`; when omitted, the
-default is `<system-temp>/symphony_workspaces`. The optional Linear adapter can
-still reference a host environment variable from `tracker.provider.api_key`.
+default is `<system-temp>/symphony_workspaces`. Linear and GitHub adapters can
+reference host environment variables from `tracker.provider.api_key` and
+`tracker.provider.token`; those variables are removed from child processes.
 
 Workflow hooks are trusted host shell programs. In particular, the example's
 `after_create` hook is where a repository is cloned into a new issue workspace.
