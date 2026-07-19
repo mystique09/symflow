@@ -4,7 +4,7 @@ This project is a V engineering-preview implementation of OpenAI's
 language-agnostic [Symphony service specification](https://github.com/openai/symphony/blob/main/SPEC.md).
 It polls eligible Markdown tickets from a local directory, prepares one isolated
 workspace per ticket, and supervises Codex app-server processes with bounded
-concurrency. Optional Linear and GitHub Issues adapters are available, but the
+concurrency. Optional Linear and GitHub Projects adapters are available, but the
 checked-in workflow and ticket queue require no tracker account, API key, or
 network access.
 
@@ -22,7 +22,7 @@ The product requirements and implementation record are in:
 - `docs/symphony-conformance.md`
 - `docs/tracker-file.md` — local ticket format, lifecycle, and recovery
 - `docs/tracker-linear.md` — optional Linear adapter contract
-- `docs/tracker-github.md` — repository-scoped GitHub Issues adapter contract
+- `docs/tracker-github.md` — Project-scoped GitHub Issue adapter contract
 - `docs/tutorial.md` — beginner setup, including the exact meaning of
   `SYMPHONY_REPOSITORY_URL`
 

@@ -1,11 +1,11 @@
-# Linear Team and GitHub Issues Tracker Product Requirements Document
+# Linear Team and GitHub Projects Tracker Product Requirements Document
 
 ## Problem Statement
 
 Symphony can currently use local Markdown tickets or a Linear project as its
 source of work. This excludes teams that organize Linear issues directly under
-a team without assigning them to a Linear Project. It also excludes repositories
-whose work queue is maintained in GitHub Issues. Operators must either reshape
+a team without assigning them to a Linear Project. It also excludes teams whose
+work queue is maintained in GitHub Projects. Operators must either reshape
 their tracker data or export tickets to local files before Symphony can dispatch
 them.
 
@@ -13,25 +13,26 @@ The tracker contract is already provider-neutral, but each adapter must define
 safe scope, state normalization, pagination, blocker handling, identity,
 credentials, and outcome behavior. Linear workspace URL slugs must not be
 mistaken for project slugs, and a human-readable issue prefix must not become an
-authorization or scoping boundary. GitHub's open and closed states are also too
-coarse to represent workflow states such as Todo, In Progress, and In Review
-without an explicit label policy.
+authorization or scoping boundary. A GitHub Project can contain issues, pull
+requests, and drafts across multiple repositories, so Project membership and a
+single-select status field must become explicit tracker boundaries.
 
 ## Solution
 
 Extend the existing Linear adapter with a team-scoped mode and add a GitHub
-Issues adapter scoped to one repository. Existing Linear project configuration
-will remain compatible. Linear configurations will select exactly one scope:
-an exact project slug or an exact team key. Both candidate reads and opaque-ID
-refreshes will enforce the selected scope.
+Projects adapter scoped to one organization- or user-owned Project. Existing
+Linear project configuration will remain compatible. Linear configurations
+will select exactly one scope: an exact project slug or an exact team key. Both
+candidate reads and opaque-ID refreshes will enforce the selected scope.
 
-The GitHub adapter will use repository issues and configurable status labels to
-produce normalized Symphony issue states. It will exclude pull requests,
-preserve non-status labels, paginate deterministically, and use a stable
-repository-and-number identity that remains opaque outside the adapter. Safe
-read-only operation will be supported. An explicitly enabled write mode will
-persist successful and blocked outcomes through dedicated terminal labels while
-leaving issues open for human review.
+The GitHub adapter will read Project items and use a configurable single-select
+status field to produce normalized Symphony issue states. It will accept only
+Issue content, exclude pull requests and drafts, preserve Issue labels, paginate
+in Project position order, and use a stable repository-and-number identity that
+remains opaque outside the adapter. Safe read-only operation will be supported.
+An explicitly enabled write mode will persist successful and blocked outcomes
+through dedicated terminal status options while leaving issues open for human
+review.
 
 Both adapters will continue to implement the common tracker contract. The
 orchestrator, scheduler, prompt renderer, workspace lifecycle, Codex transport,
@@ -51,36 +52,37 @@ and status surface will remain provider-neutral.
 10. As a Linear operator, I want project and team modes to retain assignee filtering, so that existing ownership rules continue to work.
 11. As a Linear operator, I want blocker relations normalized in team mode, so that Todo work with unresolved blockers remains non-dispatchable.
 12. As a Linear operator, I want team-mode pagination to behave like project-mode pagination, so that large queues do not hide eligible issues.
-13. As a GitHub operator, I want Symphony to use issues from one repository, so that GitHub can be the source of work without another tracker.
-14. As a GitHub operator, I want private repositories supported with a host-owned credential, so that internal work can be orchestrated safely.
-15. As a GitHub operator, I want pull requests excluded from issue polling, so that review artifacts are not dispatched as coding tickets.
-16. As a workflow author, I want each Symphony state mapped to one explicit GitHub status label, so that open issues have unambiguous workflow meaning.
-17. As a workflow author, I want duplicate status-label mappings rejected, so that two workflow states cannot claim the same provider label.
-18. As an operator, I want open issues with no recognized status label omitted safely, so that general repository issues are not dispatched accidentally.
-19. As an operator, I want open issues with multiple recognized status labels omitted safely, so that conflicting workflow state does not select work nondeterministically.
-20. As an operator, I want closed GitHub issues normalized to a terminal state, so that their workspaces can be reconciled and cleaned.
-21. As an operator, I want non-status GitHub labels preserved and normalized, so that required-label scheduling continues to work.
-22. As an operator, I want stable issue ordering across paginated GitHub responses, so that dispatch remains predictable.
-23. As an operator, I want GitHub issue identity stable across title, label, and assignee changes, so that a running claim remains attached to the same issue.
-24. As an operator, I want GitHub issue URLs and numbers exposed in normalized issue data, so that logs and the dashboard link to the source ticket.
-25. As an operator, I want GitHub issue refreshes to preserve the caller's requested order and remove duplicate IDs, so that reconciliation matches the tracker contract.
-26. As an operator, I want authentication failures, permission failures, rate limits, malformed responses, and transport failures reported distinctly, so that remediation is clear.
-27. As a security owner, I want tracker credentials declared by each adapter and removed from hooks and Codex child processes, so that agents cannot inspect provider secrets.
-28. As a security owner, I want literal credential values omitted from logs and errors, so that diagnostics are safe to retain.
-29. As a GitHub operator, I want a read-only mode, so that I can evaluate polling and reconciliation without authorizing issue mutation.
-30. As a GitHub operator, I want outcome writes to require explicit configuration, so that installing the adapter does not silently modify repository issues.
-31. As a GitHub operator, I want a successful agent attempt to apply a dedicated terminal label while leaving the issue open, so that human review remains possible without redispatch.
-32. As a GitHub operator, I want an operator-input block to apply a dedicated blocked label while leaving the issue open, so that attention-needed work is visible in GitHub.
-33. As a GitHub operator, I want failures, timeouts, stalls, process exits, and cancellations to preserve the current status label, so that Symphony's retry policy remains authoritative.
-34. As a GitHub operator, I want non-status labels preserved during outcome updates, so that categorization and routing metadata are not destroyed.
-35. As an operator, I want a persisted terminal outcome to stop continuation attempts, so that completed work is not launched repeatedly.
-36. As an operator, I want read-only outcomes to retain the existing tracker-driven continuation behavior, so that external automation can still advance the issue.
-37. As a workflow author, I want invalid state mappings and outcome states rejected by validation and doctor commands, so that errors appear before dispatch.
-38. As an operator, I want workflow reloads to validate a replacement adapter before applying it, so that a bad tracker edit preserves the last known good runtime configuration.
-39. As a developer, I want both adapters tested through the shared tracker contract, so that scheduler behavior does not acquire provider-specific branches.
-40. As a developer, I want deterministic provider fixtures in the default suite, so that tests require no network access or live credentials.
-41. As a release engineer, I want optional live smoke profiles separated from the default suite, so that production access is never required in CI.
-42. As a new operator, I want focused configuration and troubleshooting documentation for each scope, so that I can select a tracker without learning provider internals.
+13. As a GitHub operator, I want one GitHub Project to be Symphony's queue, so that Project membership is the explicit dispatch boundary.
+14. As a GitHub operator, I want organization- and user-owned Projects supported, so that either ownership model can host the queue.
+15. As a GitHub operator, I want private Projects supported with a host-owned credential, so that internal work can be orchestrated safely.
+16. As a GitHub operator, I want only Issue content dispatched, so that pull requests, drafts, and redacted items never become coding tickets.
+17. As a workflow author, I want each Symphony state mapped to one Project status option, so that Project workflow meaning is explicit.
+18. As a workflow author, I want duplicate state or option mappings rejected, so that two Symphony states cannot claim the same Project status.
+19. As an operator, I want Project Issues with no mapped Status omitted safely, so that incomplete board items are not dispatched accidentally.
+20. As an operator, I want a missing Project, status field, or configured option rejected before activation, so that a configuration typo cannot become an empty queue.
+21. As an operator, I want closed GitHub Issues normalized to a terminal state, so that their workspaces can be reconciled and cleaned.
+22. As an operator, I want GitHub Issue labels preserved and normalized independently of Project status, so that required-label scheduling continues to work.
+23. As an operator, I want Project position order preserved across pagination, so that dispatch follows the board's priority.
+24. As an operator, I want GitHub Issue identity stable across Project moves, titles, statuses, labels, and assignee changes, so that a running claim remains attached to the same issue.
+25. As an operator, I want GitHub Issue URLs, repositories, and numbers exposed in normalized issue data, so that logs and the dashboard link to the source ticket.
+26. As an operator, I want GitHub Issue refreshes scoped to current Project membership, preserving caller order and removing duplicate IDs, so that reconciliation matches the tracker contract.
+27. As an operator, I want authentication failures, permission failures, rate limits, malformed responses, scope failures, and transport failures reported distinctly, so that remediation is clear.
+28. As a security owner, I want tracker credentials declared by each adapter and removed from hooks and Codex child processes, so that agents cannot inspect provider secrets.
+29. As a security owner, I want literal credential values omitted from logs and errors, so that diagnostics are safe to retain.
+30. As a GitHub operator, I want a read-only mode, so that I can evaluate polling and reconciliation without authorizing Project mutation.
+31. As a GitHub operator, I want outcome writes to require explicit configuration, so that installing the adapter does not silently modify the Project.
+32. As a GitHub operator, I want a successful agent attempt to select a dedicated terminal Status option while leaving the Issue open, so that human review remains possible without redispatch.
+33. As a GitHub operator, I want an operator-input block to select a distinct blocked Status option while leaving the Issue open, so that attention-needed work is visible in the Project.
+34. As a GitHub operator, I want failures, timeouts, stalls, process exits, and cancellations to preserve the current Project status, so that Symphony's retry policy remains authoritative.
+35. As a GitHub operator, I want Issue labels and unrelated Project fields preserved during outcome updates, so that categorization and planning metadata are not destroyed.
+36. As an operator, I want a persisted terminal outcome to stop continuation attempts, so that completed work is not launched repeatedly.
+37. As an operator, I want read-only outcomes to retain the existing tracker-driven continuation behavior, so that external automation can still advance the issue.
+38. As a workflow author, I want invalid state mappings and outcome states rejected before dispatch, so that errors appear early.
+39. As an operator, I want workflow reloads to validate a replacement adapter's live scope before applying it, so that a bad tracker edit preserves the last known good runtime configuration.
+40. As a developer, I want Linear team and GitHub Project adapters tested through the shared tracker contract, so that scheduler behavior does not acquire provider-specific branches.
+41. As a developer, I want deterministic provider fixtures in the default suite, so that tests require no network access or live credentials.
+42. As a release engineer, I want optional live smoke profiles separated from the default suite, so that production access is never required in CI.
+43. As a new operator, I want focused configuration and troubleshooting documentation for each scope, so that I can select a tracker without learning provider internals.
 
 ## Implementation Decisions
 
@@ -99,38 +101,39 @@ and status surface will remain provider-neutral.
 - Linear scope selection does not change pagination, assignee matching, required
   record validation, label normalization, blocker normalization, or the existing
   read-only outcome policy.
-- The GitHub adapter is scoped to one repository identified by owner and name.
-  Organization-wide search, multi-repository unions, and GitHub Projects are not
-  part of the initial adapter.
-- GitHub candidate reads use the repository Issues API with bounded pagination.
-  Responses containing pull-request metadata are excluded before normalization.
+- The GitHub adapter is scoped by Project owner type, owner login, and Project
+  number. Organization- and user-owned Projects are supported. A Project may
+  contain issues from multiple repositories.
+- GitHub candidate reads use the Projects v2 GraphQL API with bounded cursor
+  pagination ordered by Project item position. Only `ISSUE` content is
+  normalized; pull requests, drafts, and redacted items are ignored.
 - A GitHub issue's opaque Symphony ID is a stable, adapter-owned composite of
   repository identity and issue number. The provider node ID, repository, and
-  number remain available in the native reference for diagnostics and future
-  provider operations.
-- GitHub ID refresh validates and parses only IDs produced by the adapter, reads
-  the corresponding repository issues, treats duplicate input as a set, and
-  returns found issues in requested order.
-- GitHub state-label configuration maps each Symphony state name to exactly one
-  provider label. State names and label names are compared using documented
-  normalization, while provider spelling is retained for writes.
-- Closed GitHub issues normalize to the configured closed terminal state.
-  Open issues must have exactly one recognized status label. Missing or
-  conflicting status labels make a candidate non-dispatchable and generate a
-  safe warning; the same ambiguity is an error during strict ID refresh.
-- Labels used for workflow state are excluded from normalized routing labels.
-  All other labels are normalized through the same shared domain behavior used
-  by existing adapters.
+  number plus Project, item, status field, and option IDs remain in the native
+  reference for diagnostics and outcome writes.
+- GitHub ID refresh validates IDs produced by the adapter, re-reads the Project,
+  treats duplicate input as a set, returns found issues in requested order, and
+  omits issues that are no longer Project members.
+- GitHub status configuration maps each Symphony state name to exactly one
+  single-select Project option. State and option names use documented
+  normalization while provider option IDs are discovered live for writes.
+- Closed GitHub Issues normalize to the configured closed terminal state. Open
+  Project Issues require one recognized status option. Missing or unmapped
+  statuses omit a candidate safely and fail strict refresh of a requested item.
+- Issue labels are independent of Project status and are normalized through the
+  shared domain behavior for required-label routing. The bounded query detects
+  label overflow and omits or rejects the Issue rather than routing from a
+  truncated label set.
 - GitHub outcome mutation is opt-in. Write mode requires configured success and
-  blocked states that have status-label mappings and are included in terminal
-  states rather than active states.
-- A successful GitHub outcome removes the previous recognized status label and
-  applies the configured success label. It does not close the issue. A blocked
-  outcome applies the configured blocked label. Other outcomes do not mutate
-  provider state.
-- GitHub outcome updates preserve every non-status label and re-read current
-  labels before applying the transition. A failed provider mutation is reported
-  as a tracker error and is not treated as persisted completion.
+  blocked states that are distinct, have status-option mappings, and are
+  terminal rather than active.
+- A successful GitHub outcome updates only the configured Project status field
+  to the success option. A blocked outcome selects the blocked option. Neither
+  closes the Issue, rewrites Issue labels, nor touches unrelated Project fields.
+  Other outcomes do not mutate provider state.
+- GitHub outcome updates re-read Project membership and option IDs before the
+  transition. A failed provider mutation is a tracker error and is not treated
+  as persisted completion.
 - Read-only GitHub mode performs no mutation and reports that completion was not
   persisted, preserving the existing continuation contract for read-only
   adapters.
@@ -140,9 +143,9 @@ and status surface will remain provider-neutral.
   child-process isolation and log redaction.
 - HTTP timeouts, response-size limits, pagination-loop detection, and stable
   error categories follow the safety posture of the existing Linear adapter.
-- Adapter construction and workflow reload validate provider scope, repository
-  syntax, state-label uniqueness, outcome states, and required credentials before
-  the configuration becomes effective.
+- Adapter construction validates local shape. Startup and workflow reload verify
+  live Linear or GitHub Project scope before the configuration becomes effective,
+  including the Project status field and configured options.
 - The status dashboard and prompt context use the existing normalized issue
   fields. They require no provider-specific conditionals.
 
@@ -159,13 +162,13 @@ and status surface will remain provider-neutral.
 - Linear tests will cover project backward compatibility, team-only candidate
   reads, team-only ID refresh, both-scope rejection, missing-scope rejection,
   pagination, assignee matching, terminal blockers, and safe errors.
-- GitHub tests will cover repository parsing, authentication metadata, bounded
-  pagination, pull-request exclusion, open and closed state normalization,
-  recognized and unrecognized labels, conflicting status labels, routing-label
-  preservation, stable IDs, duplicate refresh IDs, and strict refresh failures.
-- GitHub write-mode tests will cover successful terminal labeling, blocked
-  labeling, preservation of non-status labels, no mutation for abnormal outcomes,
-  rejected invalid outcome mappings, mutation failures, and read-only behavior.
+- GitHub Project tests will cover organization and user ownership, authentication
+  metadata, bounded position pagination, Issue-only content, open and closed
+  normalization, missing status values, label preservation, stable IDs,
+  membership-scoped refresh, duplicate refresh IDs, and strict failures.
+- GitHub write-mode tests will cover successful and blocked status-option updates,
+  distinct terminal mappings, preservation of Issue labels and unrelated Project
+  fields, no mutation for abnormal outcomes, mutation failures, and read-only behavior.
 - Adapter-factory tests will verify kind selection, provider-owned validation,
   default credential references, custom credential references, and secret
   reporting without placing credential values in assertions or diagnostics.
@@ -175,16 +178,16 @@ and status surface will remain provider-neutral.
 - Default verification will use local fixture responses and temporary files. It
   will require neither network access nor live tracker credentials.
 - Optional smoke profiles will validate one isolated Linear team and one isolated
-  GitHub repository issue using operator-supplied credentials. Smoke profiles
+  GitHub Project Issue using operator-supplied credentials. Smoke profiles
   must be explicit, bounded, and safe to skip.
 - Documentation examples will be checked for mutually exclusive Linear scopes,
-  valid repository syntax, non-conflicting GitHub labels, and the absence of
-  literal credentials.
+  valid Project owner and number syntax, non-conflicting Project status options,
+  and the absence of literal credentials.
 
 ## Out of Scope
 
-- GitHub Projects, project fields, project boards, organization-wide issue
-  search, and multi-repository queues.
+- GitHub Project views and view filters, multi-Project unions, repository-wide or
+  organization-wide issue search, and using draft issues as dispatchable work.
 - Treating pull requests, discussions, security alerts, or dependency alerts as
   dispatchable tracker issues.
 - Automatic issue creation, comment synchronization, milestone management,
@@ -207,14 +210,15 @@ and status surface will remain provider-neutral.
 ## Further Notes
 
 - The upstream Symphony tracker contract permits provider scopes such as teams
-  and repositories, so these adapters extend the integration surface without
+  and Projects, so these adapters extend the integration surface without
   changing the orchestration model.
 - Team scope is the smallest compatible correction for Linear workspaces that do
   not use Projects. It should be delivered before GitHub support because it is a
   contained extension of the existing query and validation paths.
-- GitHub status labels are a deliberate workflow contract, not a best-effort
-  inference. Requiring explicit, unambiguous labels prevents Symphony from
-  treating every open repository issue as agent-ready work.
+- GitHub Project membership and the configured Status field are a deliberate
+  workflow contract, not best-effort inference. Requiring an explicit Project
+  and mapped options prevents Symphony from treating every repository issue as
+  agent-ready work.
 - Leaving successful and blocked GitHub issues open separates Symphony's dispatch
   terminal state from the team's human review and closure policy.
 - The project remains local. This PRD does not authorize creating remote issues,

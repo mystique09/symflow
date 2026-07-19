@@ -115,9 +115,9 @@ attempts stay pending and use the configured retry backoff. See
 ### Use Linear or GitHub instead
 
 The local file queue is the simplest first run, but it is not required. Linear
-can select exactly one project or team, and GitHub can select exactly one
-repository. Keep `SYMPHONY_REPOSITORY_URL` as the clone URL for the code that
-Codex edits; tracker scope is configured separately in `WORKFLOW.md`.
+can select exactly one project or team, and GitHub can select exactly one GitHub
+Project. Keep `SYMPHONY_REPOSITORY_URL` as the clone URL for the code that Codex
+edits; tracker scope is configured separately in `WORKFLOW.md`.
 
 For Linear team scope:
 
@@ -129,22 +129,30 @@ tracker:
     team_key: ENG
 ```
 
-For a read-only GitHub queue:
+For a read-only organization-owned GitHub Project:
 
 ```yaml
 tracker:
   kind: github
   provider:
-    repository: owner/repository
+    owner_type: organization
+    owner: your-organization
+    project_number: 7
     token: $GITHUB_TOKEN
-    state_labels:
-      Todo: "status:todo"
-      In Progress: "status:in-progress"
+    status_field: Status
+    state_options:
+      Todo: Todo
+      In Progress: In Progress
     closed_state: Closed
 ```
 
+Copy `owner` and `project_number` from a URL shaped like
+`https://github.com/orgs/OWNER/projects/NUMBER`. Once an Issue is added to that
+Project and its Status is a mapped active option, Symphony can detect it. Draft
+items and pull requests are ignored.
+
 See [the Linear profile](tracker-linear.md) and
-[the GitHub Issues profile](tracker-github.md) before enabling a networked
+[the GitHub Projects profile](tracker-github.md) before enabling a networked
 tracker or GitHub outcome writes.
 
 ## 5. Validate without starting tickets

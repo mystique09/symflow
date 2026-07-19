@@ -1,8 +1,36 @@
-# GitHub Issues Tracker
+# GitHub Projects Tracker
 
-The GitHub tracker polls issues from exactly one repository and translates
-explicit status labels into Symphony workflow states. It does not use GitHub
-Projects, organization-wide search, pull requests, discussions, or webhooks.
+The GitHub tracker treats one GitHub Project as the work queue. It reads the
+Project's items, accepts only items whose content is a GitHub Issue, and maps the
+Project's single-select `Status` field into Symphony workflow states. An issue is
+therefore visible to Symphony only after it has been added to the configured
+Project.
+
+Pull requests, draft issues, redacted items, and issues outside the Project are
+not dispatched. A Project may contain issues from multiple repositories.
+
+## Find the Project scope
+
+Organization-owned Project URLs look like:
+
+```text
+https://github.com/orgs/OWNER/projects/NUMBER
+```
+
+User-owned Project URLs look like:
+
+```text
+https://github.com/users/OWNER/projects/NUMBER
+```
+
+Use `organization` or `user` for `owner_type`, copy `OWNER` into `owner`, and
+copy the final integer into `project_number`. This is separate from
+`SYMPHONY_REPOSITORY_URL`, which remains the Git clone URL for the code Codex
+will edit.
+
+GitHub documents Project item content and the Projects v2 API in its
+[Projects GraphQL reference](https://docs.github.com/en/graphql/reference/projects)
+and [Projects API guide](https://docs.github.com/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects).
 
 ## Read-only configuration
 
@@ -10,14 +38,17 @@ Projects, organization-wide search, pull requests, discussions, or webhooks.
 tracker:
   kind: github
   provider:
-    repository: owner/repository
+    owner_type: organization
+    owner: your-organization
+    project_number: 7
     token: $GITHUB_TOKEN
-    state_labels:
-      Todo: "status:todo"
-      In Progress: "status:in-progress"
-      In Review: "status:in-review"
-      Agent Complete: "status:agent-complete"
-      Blocked: "status:blocked"
+    status_field: Status
+    state_options:
+      Todo: Todo
+      In Progress: In Progress
+      In Review: In Review
+      Agent Complete: Agent Complete
+      Blocked: Blocked
     closed_state: Closed
   active_states:
     - Todo
@@ -29,27 +60,62 @@ tracker:
     - Blocked
 ```
 
-`repository` must be one `owner/name` pair. `token` accepts a literal host-owned
-value or one `$ENV_NAME` reference. When omitted, it defaults to
-`$GITHUB_TOKEN`. Environment references are recommended: Symphony removes the
-declared variable from hooks and Codex child processes and redacts the resolved
-value from its own logs.
+`owner_type` defaults to `organization`; `status_field` defaults to `Status`.
+`state_options` maps each Symphony state to the exact option displayed in that
+single-select Project field. Comparisons trim space and ignore case, but every
+state and option must remain one-to-one. Every active state needs a mapping.
 
-`state_labels` is an explicit one-to-one mapping. Every active state requires a
-label, and two states cannot normalize to the same label. Label comparisons trim
-space and ignore case; the configured spelling is retained for writes. Open
-issues with no recognized status label or more than one recognized status label
-are omitted from candidate polling. Strict refresh of an already claimed issue
-fails if the state becomes ambiguous.
+The Project, field, and configured options are checked against GitHub before a
+workflow becomes effective. A missing Project, wrong owner type, misspelled
+field, or missing option is reported as `tracker_scope` instead of becoming an
+empty queue.
 
-`closed_state` defaults to `Closed` and must be present in
-`tracker.terminal_states`. Closed GitHub issues normalize to that state without
-requiring a status label.
+`token` accepts a literal host-owned value or one `$ENV_NAME` reference. When
+omitted, it defaults to `$GITHUB_TOKEN`. Environment references are recommended:
+Symphony removes the declared variable from every workspace hook and Codex child
+process and redacts the resolved value from its logs.
 
-For public repositories, an unauthenticated mode is intentionally not provided.
-Use a fine-grained token with repository metadata and Issues read access. Keep
-automatic outcome writes disabled when evaluating the adapter or when the token
-is read-only.
+For an organization Project, a fine-grained token needs the organization's
+Projects permission set to read. Write mode needs Projects write permission.
+Classic tokens use `read:project` or `project`. Follow GitHub's
+[Project token guidance](https://docs.github.com/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects#authenticating-to-the-graphql-api).
+
+## How items become tickets
+
+Candidate polling reads Project items in Project position order with bounded
+cursor pagination. Each item must:
+
+- contain an Issue rather than a pull request or draft;
+- have a valid repository, issue number, node ID, URL, title, and timestamps;
+- have one value in the configured single-select status field; and
+- map that status option to a configured Symphony state.
+
+Malformed or unmapped candidates are omitted with a safe warning. A malformed
+already-claimed issue fails strict refresh. Closed Issues normalize to
+`closed_state`, which defaults to `Closed` and must be terminal.
+
+Issue labels are independent of Project status. Returned issue labels are
+normalized for `required_labels` routing; changing the Project status never
+replaces or removes repository labels. The bounded Project query reads up to 100
+labels per Issue. An Issue reporting more labels is omitted rather than routed
+from an incomplete label set, and strict refresh treats it as malformed.
+
+| Symphony field | GitHub source |
+| --- | --- |
+| `id` | Adapter-owned `github:owner/repository#123` opaque identity. |
+| `identifier` | Human-facing `owner/repository#123`. |
+| `native_ref` | Issue node ID, repository and number, Project ID and number, Project item ID, status field ID, and status option ID. |
+| `title`, `description`, `url` | Underlying Issue title, body, and URL. |
+| `state` | Mapped Project status option, or `closed_state` for a closed Issue. |
+| `labels` | Normalized underlying Issue labels. |
+| `assignee_id` | First Issue assignee login when present. |
+| `created_at`, `updated_at` | Valid Issue timestamps. |
+| `dispatchable` | True only for an open Project Issue in an active mapped state. |
+
+Opaque-ID refresh re-reads the configured Project, removes duplicate requested
+IDs, preserves caller order, and omits issues removed from the Project. This
+keeps Project membership—not repository membership—as the reconciliation
+boundary.
 
 ## Optional outcome writes
 
@@ -59,13 +125,16 @@ Writes are disabled by default. Enable them explicitly:
 tracker:
   kind: github
   provider:
-    repository: owner/repository
+    owner_type: organization
+    owner: your-organization
+    project_number: 7
     token: $GITHUB_TOKEN
-    state_labels:
-      Todo: "status:todo"
-      In Progress: "status:in-progress"
-      Agent Complete: "status:agent-complete"
-      Blocked: "status:blocked"
+    status_field: Status
+    state_options:
+      Todo: Todo
+      In Progress: In Progress
+      Agent Complete: Agent Complete
+      Blocked: Blocked
     closed_state: Closed
     write_outcomes: true
     success_state: Agent Complete
@@ -79,60 +148,22 @@ tracker:
     - Blocked
 ```
 
-Write mode requires Issues write permission. `success_state` and
-`blocked_state` must both have status-label mappings, must be terminal, and must
-not be active.
+`success_state` and `blocked_state` must be distinct mapped terminal states and
+must not be active. A successful attempt changes only the Project's configured
+status field to the success option. An operator-input block changes it to the
+blocked option. The underlying Issue stays open, and issue labels and every
+other Project field remain untouched.
 
-Before updating an issue, Symphony re-reads its current labels. It removes only
-recognized status labels, preserves every non-status label with provider
-spelling, and applies the configured terminal label. Successful and blocked
-issues remain open for human review. Failures, timeouts, stalls, process exits,
-and cancellations do not mutate GitHub. A failed mutation is reported as a
-tracker error and never counts as persisted completion.
-
-In read-only mode, all outcomes remain provider-owned and Symphony reports no
-persisted completion. External automation or a human must advance the status
-label to stop continuation behavior.
-
-## Reads, identity, and limits
-
-Candidate polling uses GitHub's repository Issues REST endpoint with
-`state=all`, 100 records per page, and a maximum of 100 pages. Pull requests are
-excluded whenever the response contains pull-request metadata. Pagination URLs
-must stay under the configured repository endpoint; repeated, cross-scope, or
-overlong pagination fails safely before another credentialed request.
-
-Candidate issues are sorted by issue number after all pages are normalized.
-Status labels are excluded from `issue.labels`; other labels are trimmed,
-lowercased, de-duplicated, and sorted for required-label scheduling.
-
-| Symphony field | GitHub source |
-| --- | --- |
-| `id` | Adapter-owned `github:owner/repository#123` opaque identity. |
-| `identifier` | Human-facing `owner/repository#123`. |
-| `native_ref` | GitHub node ID, repository, and issue number. |
-| `title`, `description`, `url` | Issue title, body, and `html_url`. |
-| `state` | The one mapped status-label state, or `closed_state`. |
-| `labels` | Non-status issue labels only. |
-| `assignee_id` | Primary assignee login when present. |
-| `created_at`, `updated_at` | Valid ISO-8601 provider timestamps. |
-| `dispatchable` | True only for an unambiguous open issue in an active state. |
-
-Opaque-ID refresh accepts only IDs for the configured repository, removes
-duplicates, preserves caller order, skips missing issues, and fails on malformed
-or ambiguous returned records.
-
-HTTP reads and writes use 30-second timeouts and an 8 MiB response limit.
-Authentication, permission, rate-limit, response, pagination, and transport
-failures have distinct safe error prefixes. Provider response bodies and token
-values are never included in those errors.
+Failures, timeouts, stalls, process exits, and cancellations do not update the
+Project. A failed mutation is a tracker error and never counts as persisted
+completion. In read-only mode, a human or external automation must advance the
+Project status to stop continuation behavior.
 
 ## Validate and operate
 
-`validate` checks repository syntax, state-label uniqueness, active-state
-coverage, terminal-state rules, and outcome-write configuration without
-requiring a live token. `doctor` additionally resolves the token and constructs
-the live adapter.
+`validate` checks the local shape without requiring a live token. `run` verifies
+the Project, status field, and options before accepting startup or a workflow
+reload. `doctor` resolves the token and verifies adapter construction.
 
 ```sh
 build/symphony validate WORKFLOW.md
@@ -140,7 +171,7 @@ build/symphony doctor WORKFLOW.md
 build/symphony run WORKFLOW.md --once
 ```
 
-If no issue starts, verify that it is an issue rather than a pull request, is
-open, has exactly one configured status label, satisfies required labels, and
-is not already claimed. HTTP 401 indicates an invalid credential; HTTP 403 is
-reported separately as a permission failure or rate limit.
+If no issue starts, confirm that the item is actually in the selected Project,
+its content type is Issue, its Status option is mapped and active, the Issue is
+open, and required labels match. HTTP 401 means the credential was rejected;
+HTTP 403 is classified separately as a permission failure or rate limit.
