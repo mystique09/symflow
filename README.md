@@ -123,8 +123,8 @@ for bounded worker cleanup, and stop the optional web server.
 
 The dashboard reports Symphony's live running, retrying, and blocked runtime
 state; it is not a browser for every file in `tickets/`. Inspect the Markdown
-files directly for the complete local backlog. The checked-in queue contains 22
-Daisy Chat tickets: 11 Todo, 5 In Review, and 6 In Progress.
+files directly for the complete local backlog. A local queue can contain
+provider-exported tickets across any configured active states.
 
 ## Trust posture
 
