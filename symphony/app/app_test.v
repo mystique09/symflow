@@ -76,6 +76,39 @@ fn test_validate_workflow_does_not_require_live_credentials() {
 	assert definition.prompt_template.contains('issue.identifier')
 }
 
+fn test_validate_workflow_rejects_invalid_github_state_mapping_without_live_credentials() {
+	dir := os.join_path(os.temp_dir(), 'symphony-app-github-validation-${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	path := os.join_path(dir, 'WORKFLOW.md')
+	os.write_file(path,
+		'---\ntracker:\n  kind: github\n  provider:\n    repository: octo/example\n    state_labels:\n      Todo: status:ready\n      In Progress: status:ready\n  active_states:\n    - Todo\n    - In Progress\n  terminal_states:\n    - Closed\n---\nWork on {{ issue.identifier }}')!
+
+	validate_workflow(path) or {
+		assert err.msg().contains('invalid_tracker_config')
+		assert err.msg().contains('unique')
+		return
+	}
+	assert false, 'validate must reject GitHub provider shape without resolving credentials'
+}
+
+fn test_validate_workflow_accepts_github_mapping_without_live_credentials() {
+	dir := os.join_path(os.temp_dir(), 'symphony-app-github-valid-${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	path := os.join_path(dir, 'WORKFLOW.md')
+	os.write_file(path,
+		'---\ntracker:\n  kind: github\n  provider:\n    repository: octo/example\n    token: $SYMPHONY_TEST_UNUSED_GITHUB_TOKEN\n    state_labels:\n      Todo: status:todo\n      In Progress: status:in-progress\n    closed_state: Closed\n  active_states:\n    - Todo\n    - In Progress\n  terminal_states:\n    - Closed\n---\nWork on {{ issue.identifier }}')!
+
+	definition := validate_workflow(path) or { panic(err) }
+
+	assert definition.config.tracker.kind == 'github'
+}
+
 fn test_execute_loads_explicit_env_before_doctor_tracker_validation() {
 	dir := os.join_path(os.temp_dir(), 'symphony-app-env-test-${os.getpid()}')
 	os.mkdir_all(dir)!

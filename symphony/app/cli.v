@@ -3,6 +3,7 @@ module app
 import strconv
 import symphony.domain
 import symphony.prompt
+import symphony.tracker
 import symphony.workflow
 
 pub enum CommandKind {
@@ -135,6 +136,7 @@ pub fn parse_args(args []string) !Options {
 
 pub fn validate_workflow(path string) !workflow.WorkflowDefinition {
 	definition := workflow.load(path, .syntax)!
+	tracker.validate_adapter_config(definition.config.tracker)!
 	prompt.render(definition.prompt_template, domain.Issue{
 		id:          'validation-issue'
 		identifier:  'SYM-VALIDATE'
