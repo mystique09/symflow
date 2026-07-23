@@ -27,6 +27,7 @@ pub:
 	blocked_by   []BlockerRef
 	created_at   string
 	updated_at   string
+	completed_at string
 	assignee_id  string
 	native_ref   map[string]json2.Any
 	dispatchable bool = true
@@ -166,11 +167,21 @@ pub:
 	reason           string
 }
 
+pub struct CompletedSnapshot {
+pub:
+	issue_id         string
+	issue_identifier string
+	issue_url        string
+	state            string
+	completed_at     string
+}
+
 pub struct RuntimeSnapshot {
 pub:
 	running      []RunningSnapshot
 	retrying     []RetrySnapshot
 	blocked      []BlockedSnapshot
+	completed    []CompletedSnapshot
 	tokens       TokenTotals
 	rate_limit   RateLimitSnapshot
 	runtime_secs f64

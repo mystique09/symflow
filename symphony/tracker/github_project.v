@@ -81,6 +81,16 @@ pub fn (client GitHubProjectClient) fetch_issues_by_states(states []string) ![]d
 	return snapshot.issues.filter(it.normalized_state() in wanted)
 }
 
+pub fn (client GitHubProjectClient) fetch_completed_issues(terminal_states []string) ![]domain.Issue {
+	states := if client.write_outcomes { [client.success_state] } else { terminal_states }
+	return client.fetch_issues_by_states(states)
+}
+
+// completed_issues_preserve_workspaces is true when successful outcomes are written back.
+pub fn (client GitHubProjectClient) completed_issues_preserve_workspaces() bool {
+	return client.write_outcomes
+}
+
 pub fn (client GitHubProjectClient) fetch_issues_by_ids(ids []string) ![]domain.Issue {
 	if ids.len == 0 {
 		return []domain.Issue{}

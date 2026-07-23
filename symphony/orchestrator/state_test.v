@@ -81,6 +81,40 @@ fn test_blocked_is_visible_and_terminal_release_clears_claim() {
 	state.claim(orchestration_issue(), 0, 3_000) or { panic(err) }
 }
 
+fn test_completed_snapshot_is_sorted_replaceable_and_separate_from_claims() {
+	mut state := new_state(1, 300_000)
+	state.replace_completed([
+		domain.Issue{
+			id:           '2'
+			identifier:   'OPS-2'
+			title:        'Second'
+			state:        'Done'
+			completed_at: '2026-07-23T02:00:00Z'
+		},
+		domain.Issue{
+			id:           '1'
+			identifier:   'OPS-1'
+			title:        'First'
+			state:        'Done'
+			completed_at: '2026-07-23T01:00:00Z'
+		},
+	])
+
+	snapshot := state.snapshot(2_000)
+	assert snapshot.completed.map(it.issue_identifier) == ['OPS-1', 'OPS-2']
+	assert snapshot.completed[0].completed_at == '2026-07-23T01:00:00Z'
+	state.claim(domain.Issue{
+		id:         '1'
+		identifier: 'OPS-1'
+		title:      'Reopened'
+		state:      'Todo'
+	}, 0, 2_000)!
+
+	state.replace_completed([])
+	assert state.snapshot(2_001).completed.len == 0
+	assert state.snapshot(2_001).running.len == 1
+}
+
 fn test_due_retry_reenters_running_without_releasing_claim() {
 	mut state := new_state(1, 300_000)
 	state.claim(orchestration_issue(), 0, 1_000)!

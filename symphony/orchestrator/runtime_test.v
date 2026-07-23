@@ -73,3 +73,35 @@ fn test_runtime_serializes_retry_deferral() {
 	assert runtime.defer_retry(issue.id, 5_000, 'no available orchestrator slots')
 	assert runtime.snapshot(3_000).retrying[0].error_message == 'no available orchestrator slots'
 }
+
+fn test_runtime_records_immediate_completion_and_replaces_durable_history() {
+	runtime := start_runtime(1, 60_000)
+	defer {
+		runtime.shutdown()
+	}
+	issue := runtime_test_issue()
+	assert runtime.claim(issue, 0, 1_000)
+	runtime.finish(domain.AttemptOutcome{
+		kind:     .succeeded
+		issue_id: issue.id
+	}, 2_000)
+	runtime.complete(domain.Issue{
+		...issue
+		completed_at: '2026-07-23T01:00:00Z'
+	})
+
+	snapshot := runtime.snapshot(2_001)
+	assert snapshot.retrying.len == 0
+	assert snapshot.completed.map(it.issue_identifier) == ['SYM-42']
+
+	runtime.replace_completed([
+		domain.Issue{
+			id:           'other'
+			identifier:   'SYM-99'
+			title:        'Other completion'
+			state:        'Done'
+			completed_at: '2026-07-23T02:00:00Z'
+		},
+	])
+	assert runtime.snapshot(2_002).completed.map(it.issue_identifier) == ['SYM-99']
+}

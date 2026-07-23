@@ -8,6 +8,8 @@ import symphony.workflow
 pub interface Tracker {
 	fetch_issues_by_states(states []string) ![]domain.Issue
 	fetch_issues_by_ids(ids []string) ![]domain.Issue
+	fetch_completed_issues(terminal_states []string) ![]domain.Issue
+	completed_issues_preserve_workspaces() bool
 	record_outcome(issue domain.Issue, outcome domain.AttemptOutcome) !bool
 	secret_environment_names() []string
 	secret_values() []string

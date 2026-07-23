@@ -215,9 +215,11 @@ Run continuously with the checked-in dashboard configuration:
 build/symphony run WORKFLOW.md --web-host 127.0.0.1 --web-port 8000
 ```
 
-Open `http://127.0.0.1:8000/`. The dashboard shows live running, retrying, and
-blocked Symphony runtime state. It intentionally does not list all pending files
-before they are claimed. The complete backlog remains visible in `tickets/`.
+Open `http://127.0.0.1:8000/`. The dashboard shows Running, Retrying, Blocked,
+and Done columns. Done is durable: file tickets with
+`dispatch_status: completed` return after a Symphony restart. The dashboard
+intentionally does not list all pending files before they are claimed. The
+complete backlog remains visible in `tickets/`.
 
 The JSON endpoints are:
 

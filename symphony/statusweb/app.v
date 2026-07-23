@@ -14,6 +14,7 @@ import symphony.orchestrator
 const response_entry_limit = 1_000
 const bulma_stylesheet = $embed_file('assets/bulma.min.css', .zlib)
 const symphony_stylesheet = $embed_file('assets/symphony.css', .zlib)
+const symphony_script = $embed_file('assets/symphony.js', .zlib)
 
 pub struct ServerConfig {
 pub:
@@ -45,6 +46,7 @@ pub:
 	tokens           ApiTokens
 	due_at           string
 	last_error       string
+	completed_at     string
 }
 
 pub struct ApiTokens {
@@ -56,9 +58,10 @@ pub:
 
 pub struct ApiCounts {
 pub:
-	running  int
-	retrying int
-	blocked  int
+	running   int
+	retrying  int
+	blocked   int
+	completed int
 }
 
 pub struct ApiRunning {
@@ -100,6 +103,15 @@ pub:
 	reason           string
 }
 
+pub struct ApiCompleted {
+pub:
+	issue_id         string
+	issue_identifier string
+	issue_url        string
+	state            string
+	completed_at     string
+}
+
 pub struct ApiCodexTotals {
 pub:
 	input_tokens    i64
@@ -115,6 +127,7 @@ pub:
 	running      []ApiRunning
 	retrying     []ApiRetrying
 	blocked      []ApiBlocked
+	completed    []ApiCompleted
 	codex_totals ApiCodexTotals
 	rate_limits  domain.RateLimitSnapshot
 }
@@ -150,6 +163,8 @@ pub:
 	running          []DashboardRunningRow
 	retrying         []DashboardRetryingRow
 	blocked          []DashboardBlockedRow
+	in_review        []DashboardRunningRow
+	completed        []DashboardCompletedRow
 }
 
 struct DashboardRunningRow {
@@ -179,6 +194,14 @@ pub:
 	state            string
 	attempt          int
 	reason           string
+}
+
+struct DashboardCompletedRow {
+pub:
+	issue_identifier string
+	issue_url        string
+	state            string
+	completed_at     string
 }
 
 pub fn find_issue(snapshot domain.RuntimeSnapshot, issue_id string) !IssueStatus {
@@ -232,6 +255,19 @@ pub fn find_issue(snapshot domain.RuntimeSnapshot, issue_id string) !IssueStatus
 			}
 		}
 	}
+	for entry in snapshot.completed {
+		if entry.issue_id == issue_id || entry.issue_identifier == issue_id {
+			return IssueStatus{
+				issue_id:         entry.issue_id
+				issue_identifier: entry.issue_identifier
+				issue_url:        entry.issue_url
+				status:           'completed'
+				phase:            'completed'
+				state:            entry.state
+				completed_at:     entry.completed_at
+			}
+		}
+	}
 	return error('issue not found')
 }
 
@@ -240,9 +276,10 @@ pub fn api_state(snapshot domain.RuntimeSnapshot) ApiState {
 	return ApiState{
 		generated_at: format_millis(bounded_snapshot.generated_at)
 		counts:       ApiCounts{
-			running:  bounded_snapshot.running.len
-			retrying: bounded_snapshot.retrying.len
-			blocked:  bounded_snapshot.blocked.len
+			running:   bounded_snapshot.running.len
+			retrying:  bounded_snapshot.retrying.len
+			blocked:   bounded_snapshot.blocked.len
+			completed: bounded_snapshot.completed.len
 		}
 		running:      bounded_snapshot.running.map(ApiRunning{
 			issue_id:         it.issue_id
@@ -277,6 +314,13 @@ pub fn api_state(snapshot domain.RuntimeSnapshot) ApiState {
 			attempt:          it.attempt
 			reason:           bounded(it.reason, 2_048)
 		})
+		completed:    bounded_snapshot.completed.map(ApiCompleted{
+			issue_id:         it.issue_id
+			issue_identifier: it.issue_identifier
+			issue_url:        it.issue_url
+			state:            it.state
+			completed_at:     it.completed_at
+		})
 		codex_totals: ApiCodexTotals{
 			input_tokens:    bounded_snapshot.tokens.input
 			output_tokens:   bounded_snapshot.tokens.output
@@ -290,9 +334,10 @@ pub fn api_state(snapshot domain.RuntimeSnapshot) ApiState {
 pub fn api_snapshot(snapshot domain.RuntimeSnapshot) domain.RuntimeSnapshot {
 	return domain.RuntimeSnapshot{
 		...snapshot
-		running:  snapshot.running[..min_int(snapshot.running.len, response_entry_limit)].clone()
-		retrying: snapshot.retrying[..min_int(snapshot.retrying.len, response_entry_limit)].clone()
-		blocked:  snapshot.blocked[..min_int(snapshot.blocked.len, response_entry_limit)].clone()
+		running:   snapshot.running[..min_int(snapshot.running.len, response_entry_limit)].clone()
+		retrying:  snapshot.retrying[..min_int(snapshot.retrying.len, response_entry_limit)].clone()
+		blocked:   snapshot.blocked[..min_int(snapshot.blocked.len, response_entry_limit)].clone()
+		completed: snapshot.completed[..min_int(snapshot.completed.len, response_entry_limit)].clone()
 	}
 }
 
@@ -350,6 +395,12 @@ pub fn (app &App) symphony_css(mut ctx Context) veb.Result {
 	return ctx.send_response_to_client('text/css', symphony_stylesheet.to_string())
 }
 
+@['/assets/symphony.js']
+pub fn (app &App) symphony_js(mut ctx Context) veb.Result {
+	_ = app
+	return ctx.send_response_to_client('text/javascript', symphony_script.to_string())
+}
+
 @['/healthz']
 pub fn (app &App) health(mut ctx Context) veb.Result {
 	return ctx.json({
@@ -389,7 +440,7 @@ pub fn (app &App) issue_by_identifier(mut ctx Context, identifier string) veb.Re
 		return ctx.json(ApiError{
 			error: ApiErrorDetail{
 				code:    'issue_not_found'
-				message: 'no active, retrying, or blocked issue matches `${identifier}`'
+				message: 'no active, retrying, blocked, or completed issue matches `${identifier}`'
 			}
 		})
 	}
@@ -447,6 +498,16 @@ pub fn serve(runtime orchestrator.Runtime, refresh chan bool, stop chan bool, co
 fn dashboard_view(snapshot domain.RuntimeSnapshot) DashboardView {
 	generated_at := format_millis(snapshot.generated_at)
 	rate_reset := format_millis(snapshot.rate_limit.resets_at)
+	mut running := []DashboardRunningRow{}
+	mut in_review := []DashboardRunningRow{}
+	for entry in snapshot.running {
+		row := dashboard_running_row(entry)
+		if domain.normalize_name(entry.state) == 'in review' {
+			in_review << row
+		} else {
+			running << row
+		}
+	}
 	return DashboardView{
 		generated_at:     if generated_at == '' { 'Awaiting first snapshot' } else { generated_at }
 		generated_at_iso: generated_at
@@ -455,15 +516,7 @@ fn dashboard_view(snapshot domain.RuntimeSnapshot) DashboardView {
 		rate_used:        '${snapshot.rate_limit.used_percent}%'
 		rate_reset:       if rate_reset == '' { 'Not reported' } else { rate_reset }
 		rate_reset_iso:   rate_reset
-		running:          snapshot.running.map(DashboardRunningRow{
-			issue_identifier: issue_label(it.issue_identifier)
-			issue_url:        sanitized_issue_url(it.issue_url)
-			state:            display_text(it.state)
-			attempt:          it.attempt
-			turn_count:       it.turn_count
-			last_event:       display_text(it.last_event)
-			tokens:           compact_number(it.tokens.total)
-		})
+		running:          running
 		retrying:         snapshot.retrying.map(DashboardRetryingRow{
 			issue_identifier: issue_label(it.issue_identifier)
 			issue_url:        sanitized_issue_url(it.issue_url)
@@ -478,6 +531,25 @@ fn dashboard_view(snapshot domain.RuntimeSnapshot) DashboardView {
 			attempt:          it.attempt
 			reason:           display_text(bounded(it.reason, 2_048))
 		})
+		in_review:        in_review
+		completed:        snapshot.completed.map(DashboardCompletedRow{
+			issue_identifier: issue_label(it.issue_identifier)
+			issue_url:        sanitized_issue_url(it.issue_url)
+			state:            display_text(it.state)
+			completed_at:     display_text_or(it.completed_at, 'Not reported')
+		})
+	}
+}
+
+fn dashboard_running_row(entry domain.RunningSnapshot) DashboardRunningRow {
+	return DashboardRunningRow{
+		issue_identifier: issue_label(entry.issue_identifier)
+		issue_url:        sanitized_issue_url(entry.issue_url)
+		state:            display_text(entry.state)
+		attempt:          entry.attempt
+		turn_count:       entry.turn_count
+		last_event:       display_text(entry.last_event)
+		tokens:           compact_number(entry.tokens.total)
 	}
 }
 

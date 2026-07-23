@@ -78,15 +78,33 @@ pub fn (client FileClient) fetch_issues_by_states(states []string) ![]domain.Iss
 		return []domain.Issue{}
 	}
 	wanted := states.map(domain.normalize_name(it))
+	terminal := client.terminal_states.map(domain.normalize_name(it))
 	snapshot := client.load_snapshot()!
 	mut issues := []domain.Issue{}
 	for ticket in snapshot {
-		if ticket.metadata.dispatch_status == 'pending'
-			&& domain.normalize_name(ticket.metadata.state) in wanted {
+		state := domain.normalize_name(ticket.metadata.state)
+		if state in wanted && (ticket.metadata.dispatch_status == 'pending' || state in terminal) {
 			issues << issue_from_file_ticket(ticket, client.terminal_states)
 		}
 	}
 	return issues
+}
+
+// fetch_completed_issues returns durable file-backed completion history.
+pub fn (client FileClient) fetch_completed_issues(_ []string) ![]domain.Issue {
+	snapshot := client.load_snapshot()!
+	mut issues := []domain.Issue{}
+	for ticket in snapshot {
+		if ticket.metadata.dispatch_status == 'completed' {
+			issues << issue_from_file_ticket(ticket, client.terminal_states)
+		}
+	}
+	return issues
+}
+
+// completed_issues_preserve_workspaces identifies durable agent completions.
+pub fn (_ FileClient) completed_issues_preserve_workspaces() bool {
+	return true
 }
 
 // fetch_issues_by_ids returns tickets in requested identity order.
@@ -335,6 +353,7 @@ fn issue_from_file_ticket(ticket ParsedFileTicket, terminal_states []string) dom
 		blocked_by:   blockers
 		created_at:   metadata.created_at
 		updated_at:   metadata.updated_at
+		completed_at: metadata.completed_at
 		assignee_id:  metadata.assignee_id
 		native_ref:   {
 			'file_path': json2.Any(ticket.path)

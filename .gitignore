@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 build/
+.worktrees/
 .cortana_browser
 .superpowers
 tickets/

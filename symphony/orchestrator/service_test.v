@@ -1,11 +1,23 @@
 module orchestrator
 
 import os
+import net.http
 import time
 import yaml
 import symphony.domain
 import symphony.tracker
 import symphony.workflow
+
+struct TerminalLinearHandler {}
+
+fn (mut handler TerminalLinearHandler) handle(_ http.Request) http.Response {
+	_ = handler
+	mut response := http.Response{
+		body: '{"data":{"issues":{"nodes":[{"id":"linear-terminal","identifier":"SYM-LINEAR","title":"Terminal while offline","state":{"name":"Done"},"labels":{"nodes":[]},"inverseRelations":{"nodes":[]},"createdAt":"2026-07-22T01:00:00Z","updatedAt":"2026-07-23T01:00:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}'
+	}
+	response.set_status(.ok)
+	return response
+}
 
 struct NonDispatchableTracker {
 	issue domain.Issue
@@ -17,6 +29,14 @@ fn (client NonDispatchableTracker) fetch_issues_by_states(_ []string) ![]domain.
 
 fn (_ NonDispatchableTracker) fetch_issues_by_ids(_ []string) ![]domain.Issue {
 	return []domain.Issue{}
+}
+
+fn (_ NonDispatchableTracker) fetch_completed_issues(_ []string) ![]domain.Issue {
+	return []domain.Issue{}
+}
+
+fn (_ NonDispatchableTracker) completed_issues_preserve_workspaces() bool {
+	return false
 }
 
 fn (_ NonDispatchableTracker) record_outcome(_ domain.Issue, _ domain.AttemptOutcome) !bool {
@@ -77,7 +97,189 @@ fn test_successful_file_outcome_releases_claim_without_continuation() {
 	snapshot := runtime.snapshot(2_000)
 	assert snapshot.running.len == 0
 	assert snapshot.retrying.len == 0
+	assert snapshot.completed.map(it.issue_identifier) == ['SYM-400']
 	assert os.read_file(ticket_path)!.contains('dispatch_status: completed')
+}
+
+fn test_poll_syncs_persisted_file_completions_after_restart() {
+	dir := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	os.write_file(os.join_path(dir, 'SYM-401.md'),
+		'---\nschema_version: 1\nid: "opaque-401"\nidentifier: SYM-401\ntitle: "Already done"\nstate: Todo\ndispatch_status: completed\nlast_error: ""\ncompleted_at: "2026-07-23T01:00:00Z"\n---\n\nCompleted earlier.\n')!
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker: workflow.TrackerConfig{
+				kind:            'file'
+				provider:        {
+					'root': yaml.Any(dir)
+				}
+				active_states:   ['Todo']
+				terminal_states: ['Done']
+			}
+			agent:   workflow.AgentConfig{
+				max_concurrent_agents: 1
+				max_retry_backoff_ms:  300_000
+			}
+		}
+	}
+	runtime := start_runtime(1, 300_000)
+	defer {
+		runtime.shutdown()
+	}
+	mut cancellations := map[string]chan bool{}
+	mut remove_after_finish := map[string]bool{}
+
+	poll_and_dispatch(definition, runtime, chan WorkerEvent{cap: 1}, mut cancellations, mut
+		remove_after_finish)!
+
+	completed := runtime.snapshot(2_000).completed
+	assert completed.map(it.issue_identifier) == ['SYM-401']
+	assert completed[0].completed_at == '2026-07-23T01:00:00Z'
+	assert cancellations.len == 0
+}
+
+fn test_startup_cleanup_removes_terminal_file_workspace_when_dispatch_is_blocked() {
+	ticket_dir := service_file_tracker_test_dir()
+	workspace_root := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(ticket_dir) or {}
+		os.rmdir_all(workspace_root) or {}
+	}
+	os.write_file(os.join_path(ticket_dir, 'SYM-TERMINAL.md'),
+		'---\nschema_version: 1\nid: "terminal-issue"\nidentifier: SYM-TERMINAL\ntitle: "Already terminal"\nstate: Done\ndispatch_status: blocked\nlast_error: "operator input required"\ncompleted_at: ""\n---\n\nRemove the stale workspace.\n')!
+	issue_workspace := os.join_path(workspace_root, 'SYM-TERMINAL')
+	os.mkdir_all(issue_workspace)!
+	os.write_file(os.join_path(issue_workspace, 'marker.txt'), 'stale')!
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker:   workflow.TrackerConfig{
+				kind:            'file'
+				provider:        {
+					'root': yaml.Any(ticket_dir)
+				}
+				terminal_states: ['Done']
+			}
+			workspace: workflow.WorkspaceConfig{
+				root: workspace_root
+			}
+		}
+	}
+
+	cleanup_terminal_workspaces(definition)!
+
+	assert !os.exists(issue_workspace)
+}
+
+fn test_startup_cleanup_preserves_completed_file_workspace_in_active_state() {
+	ticket_dir := service_file_tracker_test_dir()
+	workspace_root := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(ticket_dir) or {}
+		os.rmdir_all(workspace_root) or {}
+	}
+	os.write_file(os.join_path(ticket_dir, 'SYM-COMPLETED.md'),
+		'---\nschema_version: 1\nid: "completed-issue"\nidentifier: SYM-COMPLETED\ntitle: "Awaiting operator review"\nstate: Todo\ndispatch_status: completed\nlast_error: ""\ncompleted_at: "2026-07-23T11:00:00Z"\n---\n\nKeep the completed branch for review.\n')!
+	issue_workspace := os.join_path(workspace_root, 'SYM-COMPLETED')
+	os.mkdir_all(issue_workspace)!
+	os.write_file(os.join_path(issue_workspace, 'marker.txt'), 'unmerged work')!
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker:   workflow.TrackerConfig{
+				kind:            'file'
+				provider:        {
+					'root': yaml.Any(ticket_dir)
+				}
+				active_states:   ['Todo']
+				terminal_states: ['Done']
+			}
+			workspace: workflow.WorkspaceConfig{
+				root: workspace_root
+			}
+		}
+	}
+
+	cleanup_terminal_workspaces(definition)!
+
+	assert os.exists(issue_workspace)
+	assert os.read_file(os.join_path(issue_workspace, 'marker.txt'))! == 'unmerged work'
+}
+
+fn test_startup_cleanup_preserves_completed_file_workspace_in_terminal_state() {
+	ticket_dir := service_file_tracker_test_dir()
+	workspace_root := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(ticket_dir) or {}
+		os.rmdir_all(workspace_root) or {}
+	}
+	os.write_file(os.join_path(ticket_dir, 'SYM-SUCCESS.md'),
+		'---\nschema_version: 1\nid: "successful-issue"\nidentifier: SYM-SUCCESS\ntitle: "Completed successfully"\nstate: Done\ndispatch_status: completed\nlast_error: ""\ncompleted_at: "2026-07-23T11:30:00Z"\n---\n\nKeep the successful branch for review.\n')!
+	issue_workspace := os.join_path(workspace_root, 'SYM-SUCCESS')
+	os.mkdir_all(issue_workspace)!
+	os.write_file(os.join_path(issue_workspace, 'marker.txt'), 'successful unmerged work')!
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker:   workflow.TrackerConfig{
+				kind:            'file'
+				provider:        {
+					'root': yaml.Any(ticket_dir)
+				}
+				active_states:   ['Todo']
+				terminal_states: ['Done']
+			}
+			workspace: workflow.WorkspaceConfig{
+				root: workspace_root
+			}
+		}
+	}
+
+	cleanup_terminal_workspaces(definition)!
+
+	assert os.exists(issue_workspace)
+	assert os.read_file(os.join_path(issue_workspace, 'marker.txt'))! == 'successful unmerged work'
+}
+
+fn test_startup_cleanup_removes_read_only_linear_terminal_workspace() {
+	workspace_root := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(workspace_root) or {}
+	}
+	issue_workspace := os.join_path(workspace_root, 'SYM-LINEAR')
+	os.mkdir_all(issue_workspace)!
+	os.write_file(os.join_path(issue_workspace, 'marker.txt'), 'stale terminal work')!
+	mut server := &http.Server{
+		accept_timeout:       100 * time.millisecond
+		handler:              TerminalLinearHandler{}
+		addr:                 '127.0.0.1:0'
+		show_startup_message: false
+	}
+	server_thread := spawn server.listen_and_serve()
+	server.wait_till_running()!
+	defer {
+		server.stop()
+		server_thread.wait()
+	}
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker:   workflow.TrackerConfig{
+				kind:            'linear'
+				provider:        {
+					'endpoint':     yaml.Any('http://${server.addr}')
+					'api_key':      yaml.Any('test-token')
+					'project_slug': yaml.Any('test-project')
+				}
+				terminal_states: ['Done']
+			}
+			workspace: workflow.WorkspaceConfig{
+				root: workspace_root
+			}
+		}
+	}
+
+	cleanup_terminal_workspaces(definition)!
+
+	assert !os.exists(issue_workspace)
 }
 
 fn test_worker_outcome_stays_bound_to_its_original_tracker_definition() {
@@ -220,6 +422,8 @@ fn test_workspace_git_policy_keeps_the_agent_off_protected_branches() {
 	assert prompt.contains('Work only on the prepared issue branch `feature/ops-42`')
 	assert prompt.contains('protected base branch `staging`, `main`, or `master`')
 	assert prompt.contains('Do not push any branch unless the issue or workflow explicitly requires it')
+	assert prompt.contains('Leave the completed issue branch as-is')
+	assert prompt.contains('Do not ask how to merge, push, or clean up the branch')
 	assert prompt.ends_with('Implement the ticket.')
 	assert prepend_workspace_git_policy('Plain prompt.', '', 'main') == 'Plain prompt.'
 }

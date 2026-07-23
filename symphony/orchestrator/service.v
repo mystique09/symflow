@@ -111,11 +111,16 @@ fn poll_and_dispatch(definition workflow.WorkflowDefinition, runtime Runtime, ev
 	}
 	client := tracker.new_adapter(config.tracker)!
 	policy := scheduling_policy(config)
+	sync_completed(runtime, client, config.tracker.terminal_states)!
 	reconcile_running(definition, runtime, client, policy, mut cancellations, mut
 		remove_after_finish)!
 	reconcile_blocked(definition, runtime, client, policy)!
 	activate_due_retries(definition, runtime, client, policy, events, mut cancellations)!
 	dispatch_candidates(definition, runtime, client, policy, events, mut cancellations)!
+}
+
+fn sync_completed(runtime Runtime, client tracker.Tracker, terminal_states []string) ! {
+	runtime.replace_completed(client.fetch_completed_issues(terminal_states)!)
 }
 
 fn reconcile_blocked(definition workflow.WorkflowDefinition, runtime Runtime, client tracker.Tracker, policy scheduler.Policy) ! {
@@ -150,8 +155,18 @@ fn reconcile_blocked(definition workflow.WorkflowDefinition, runtime Runtime, cl
 
 fn cleanup_terminal_workspaces(definition workflow.WorkflowDefinition) ! {
 	client := tracker.new_adapter(definition.config.tracker)!
+	mut completed_ids := map[string]bool{}
+	if client.completed_issues_preserve_workspaces() {
+		completed := client.fetch_completed_issues(definition.config.tracker.terminal_states)!
+		for issue in completed {
+			completed_ids[issue.id] = true
+		}
+	}
 	issues := client.fetch_issues_by_states(definition.config.tracker.terminal_states)!
 	for issue in issues {
+		if completed_ids[issue.id] {
+			continue
+		}
 		remove_issue_workspace(definition, issue) or {
 			emit(definition, 'warn', 'workspace_cleanup_failed', issue, 0, err.msg())
 		}
@@ -365,7 +380,7 @@ fn prepend_workspace_git_policy(rendered string, branch string, base_branch stri
 	if branch == '' {
 		return rendered
 	}
-	return 'Git workspace policy:\n- Work only on the prepared issue branch `${branch}`.\n- Do not switch to, commit on, or push the protected base branch `${base_branch}`, `main`, or `master`.\n- Do not push any branch unless the issue or workflow explicitly requires it.\n\n${rendered}'
+	return 'Git workspace policy:\n- Work only on the prepared issue branch `${branch}`.\n- Do not switch to, commit on, or push the protected base branch `${base_branch}`, `main`, or `master`.\n- Do not push any branch unless the issue or workflow explicitly requires it.\n- Leave the completed issue branch as-is for the operator.\n- Do not ask how to merge, push, or clean up the branch; finish the turn after reporting verification.\n\n${rendered}'
 }
 
 fn emit_session(definition workflow.WorkflowDefinition, event string, issue domain.Issue, attempt int, update domain.SessionUpdate) {
@@ -421,7 +436,10 @@ fn handle_worker_event(runtime Runtime, event WorkerEvent, mut cancellations map
 	completion_persisted := persist_tracker_outcome(definition, event)
 	runtime.finish(event.outcome, time.now().unix_milli())
 	if completion_persisted && event.outcome.kind == .succeeded {
-		runtime.release(event.issue.id)
+		runtime.complete(domain.Issue{
+			...event.issue
+			completed_at: time.utc().format_rfc3339()
+		})
 	}
 	if remove_after_finish[event.issue.id] {
 		remove_issue_workspace(definition, event.issue) or {

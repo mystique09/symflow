@@ -27,6 +27,18 @@ fn paged_transport(_ string, token string, body string) !TransportResponse {
 	}
 }
 
+fn completed_transport(_ string, token string, body string) !TransportResponse {
+	assert token == 'secret'
+	payload := json2.decode[json2.Any](body) or { panic(err) }.as_map()
+	variables := (payload['variables'] or { panic('variables') }).as_map()
+	states := (variables['stateNames'] or { panic('stateNames') }).as_array().map(it.str())
+	assert states == ['Done']
+	return TransportResponse{
+		status: 200
+		body:   '{"data":{"issues":{"nodes":[{"id":"3","identifier":"OPS-3","title":"Done issue","state":{"name":"Done"},"labels":{"nodes":[]},"inverseRelations":{"nodes":[]},"createdAt":"2026-07-20T00:00:00Z","updatedAt":"2026-07-23T01:00:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}'
+	}
+}
+
 fn unauthorized_transport(_ string, _ string, _ string) !TransportResponse {
 	return TransportResponse{
 		status: 401
@@ -150,6 +162,22 @@ fn test_pagination_preserves_order_and_drops_malformed_candidates() {
 	assert issues[0].blocked_by[0].identifier == 'OPS-9'
 	assert (issues[0].native_ref['linear_issue_id'] or { panic('linear_issue_id') }).str() == '1'
 	assert issues[0].dispatchable
+}
+
+fn test_linear_completed_query_uses_terminal_states() {
+	client := LinearClient{
+		endpoint:        'https://linear.test/graphql'
+		api_key:         'secret'
+		project_slug:    'demo-project'
+		terminal_states: ['Done']
+		transport:       completed_transport
+	}
+
+	completed := client.fetch_completed_issues(['Done'])!
+
+	assert !client.completed_issues_preserve_workspaces()
+	assert completed.map(it.identifier) == ['OPS-3']
+	assert completed[0].state == 'Done'
 }
 
 fn test_configured_assignee_controls_dispatchable_normalization() {
