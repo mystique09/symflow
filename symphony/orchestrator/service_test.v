@@ -124,6 +124,38 @@ fn test_poll_syncs_persisted_file_completions_after_restart() {
 	assert cancellations.len == 0
 }
 
+fn test_startup_cleanup_removes_terminal_file_workspace_when_dispatch_is_blocked() {
+	ticket_dir := service_file_tracker_test_dir()
+	workspace_root := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(ticket_dir) or {}
+		os.rmdir_all(workspace_root) or {}
+	}
+	os.write_file(os.join_path(ticket_dir, 'SYM-TERMINAL.md'),
+		'---\nschema_version: 1\nid: "terminal-issue"\nidentifier: SYM-TERMINAL\ntitle: "Already terminal"\nstate: Done\ndispatch_status: blocked\nlast_error: "operator input required"\ncompleted_at: ""\n---\n\nRemove the stale workspace.\n')!
+	issue_workspace := os.join_path(workspace_root, 'SYM-TERMINAL')
+	os.mkdir_all(issue_workspace)!
+	os.write_file(os.join_path(issue_workspace, 'marker.txt'), 'stale')!
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker:   workflow.TrackerConfig{
+				kind:            'file'
+				provider:        {
+					'root': yaml.Any(ticket_dir)
+				}
+				terminal_states: ['Done']
+			}
+			workspace: workflow.WorkspaceConfig{
+				root: workspace_root
+			}
+		}
+	}
+
+	cleanup_terminal_workspaces(definition)!
+
+	assert !os.exists(issue_workspace)
+}
+
 fn test_worker_outcome_stays_bound_to_its_original_tracker_definition() {
 	original_dir := service_file_tracker_test_dir()
 	reloaded_dir := service_file_tracker_test_dir()

@@ -78,11 +78,12 @@ pub fn (client FileClient) fetch_issues_by_states(states []string) ![]domain.Iss
 		return []domain.Issue{}
 	}
 	wanted := states.map(domain.normalize_name(it))
+	terminal := client.terminal_states.map(domain.normalize_name(it))
 	snapshot := client.load_snapshot()!
 	mut issues := []domain.Issue{}
 	for ticket in snapshot {
-		if ticket.metadata.dispatch_status == 'pending'
-			&& domain.normalize_name(ticket.metadata.state) in wanted {
+		state := domain.normalize_name(ticket.metadata.state)
+		if state in wanted && (ticket.metadata.dispatch_status == 'pending' || state in terminal) {
 			issues << issue_from_file_ticket(ticket, client.terminal_states)
 		}
 	}
