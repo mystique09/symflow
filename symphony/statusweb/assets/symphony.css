@@ -8,6 +8,7 @@
   --symphony-running: #2f765c;
   --symphony-retrying: #9a6421;
   --symphony-blocked: #a64343;
+  --symphony-in-review: #566b9b;
   --symphony-done: #356b8c;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -145,7 +146,7 @@ a:focus-visible,
 .operations-board {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(4, minmax(20rem, 1fr));
+  grid-template-columns: repeat(5, minmax(20rem, 1fr));
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   padding: var(--space-1) var(--space-1) var(--space-3);
@@ -189,6 +190,10 @@ a:focus-visible,
 
 .queue-blocked .queue-title {
   color: var(--symphony-blocked);
+}
+
+.queue-in-review .queue-title {
+  color: var(--symphony-in-review);
 }
 
 .queue-done .queue-title {
@@ -318,7 +323,7 @@ a:focus-visible,
 
 @media (max-width: 70rem) {
   .operations-board {
-    grid-template-columns: repeat(4, minmax(20rem, 22rem));
+    grid-template-columns: repeat(5, minmax(20rem, 22rem));
   }
 }
 
@@ -340,7 +345,7 @@ a:focus-visible,
   }
 
   .operations-board {
-    grid-template-columns: repeat(4, minmax(85vw, 85vw));
+    grid-template-columns: repeat(5, minmax(85vw, 85vw));
     scroll-snap-type: x mandatory;
   }
 

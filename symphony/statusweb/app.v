@@ -163,6 +163,7 @@ pub:
 	running          []DashboardRunningRow
 	retrying         []DashboardRetryingRow
 	blocked          []DashboardBlockedRow
+	in_review        []DashboardRunningRow
 	completed        []DashboardCompletedRow
 }
 
@@ -497,6 +498,16 @@ pub fn serve(runtime orchestrator.Runtime, refresh chan bool, stop chan bool, co
 fn dashboard_view(snapshot domain.RuntimeSnapshot) DashboardView {
 	generated_at := format_millis(snapshot.generated_at)
 	rate_reset := format_millis(snapshot.rate_limit.resets_at)
+	mut running := []DashboardRunningRow{}
+	mut in_review := []DashboardRunningRow{}
+	for entry in snapshot.running {
+		row := dashboard_running_row(entry)
+		if domain.normalize_name(entry.state) == 'in review' {
+			in_review << row
+		} else {
+			running << row
+		}
+	}
 	return DashboardView{
 		generated_at:     if generated_at == '' { 'Awaiting first snapshot' } else { generated_at }
 		generated_at_iso: generated_at
@@ -505,15 +516,7 @@ fn dashboard_view(snapshot domain.RuntimeSnapshot) DashboardView {
 		rate_used:        '${snapshot.rate_limit.used_percent}%'
 		rate_reset:       if rate_reset == '' { 'Not reported' } else { rate_reset }
 		rate_reset_iso:   rate_reset
-		running:          snapshot.running.map(DashboardRunningRow{
-			issue_identifier: issue_label(it.issue_identifier)
-			issue_url:        sanitized_issue_url(it.issue_url)
-			state:            display_text(it.state)
-			attempt:          it.attempt
-			turn_count:       it.turn_count
-			last_event:       display_text(it.last_event)
-			tokens:           compact_number(it.tokens.total)
-		})
+		running:          running
 		retrying:         snapshot.retrying.map(DashboardRetryingRow{
 			issue_identifier: issue_label(it.issue_identifier)
 			issue_url:        sanitized_issue_url(it.issue_url)
@@ -528,12 +531,25 @@ fn dashboard_view(snapshot domain.RuntimeSnapshot) DashboardView {
 			attempt:          it.attempt
 			reason:           display_text(bounded(it.reason, 2_048))
 		})
+		in_review:        in_review
 		completed:        snapshot.completed.map(DashboardCompletedRow{
 			issue_identifier: issue_label(it.issue_identifier)
 			issue_url:        sanitized_issue_url(it.issue_url)
 			state:            display_text(it.state)
 			completed_at:     display_text_or(it.completed_at, 'Not reported')
 		})
+	}
+}
+
+fn dashboard_running_row(entry domain.RunningSnapshot) DashboardRunningRow {
+	return DashboardRunningRow{
+		issue_identifier: issue_label(entry.issue_identifier)
+		issue_url:        sanitized_issue_url(entry.issue_url)
+		state:            display_text(entry.state)
+		attempt:          entry.attempt
+		turn_count:       entry.turn_count
+		last_event:       display_text(entry.last_event)
+		tokens:           compact_number(entry.tokens.total)
 	}
 }
 

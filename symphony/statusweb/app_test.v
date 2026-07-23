@@ -89,11 +89,29 @@ fn test_safe_issue_url_requires_an_absolute_http_url_with_a_host() {
 	assert !safe_issue_url(' https://linear.app/acme/issue/SYM-42')
 }
 
+fn test_dashboard_partitions_running_in_review_without_changing_runtime_state() {
+	view := dashboard_view(domain.RuntimeSnapshot{
+		running: [
+			domain.RunningSnapshot{
+				issue_identifier: 'SYM-REVIEW'
+				state:            ' in REVIEW '
+			},
+			domain.RunningSnapshot{
+				issue_identifier: 'SYM-RUNNING'
+				state:            'Todo'
+			},
+		]
+	})
+
+	assert view.running.map(it.issue_identifier) == ['SYM-RUNNING']
+	assert view.in_review.map(it.issue_identifier) == ['SYM-REVIEW']
+}
+
 fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	mut listener := net.listen_tcp(.ip, '127.0.0.1:0')!
 	port := int(listener.addr()!.port()!)
 	listener.close()!
-	runtime := orchestrator.start_runtime(2, 60_000)
+	runtime := orchestrator.start_runtime(3, 60_000)
 	assert runtime.claim(domain.Issue{
 		id:         'route-issue'
 		identifier: 'SYM-WEB'
@@ -107,6 +125,12 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 		url:        'javascript:alert(1)'
 		title:      'Exercise template escaping'
 		state:      '<b>Todo</b>'
+	}, 0, time.now().unix_milli())
+	assert runtime.claim(domain.Issue{
+		id:         'review-route-issue'
+		identifier: 'SYM-REVIEW'
+		title:      'Exercise In Review rendering'
+		state:      'In Review'
 	}, 0, time.now().unix_milli())
 	runtime.replace_completed([
 		domain.Issue{
@@ -141,7 +165,18 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	assert dashboard.body.contains('class="board-column queue-running"')
 	assert dashboard.body.contains('class="board-column queue-retrying"')
 	assert dashboard.body.contains('class="board-column queue-blocked"')
+	assert dashboard.body.contains('class="board-column queue-in-review"')
 	assert dashboard.body.contains('class="board-column queue-done"')
+	running_position := dashboard.body.index('class="board-column queue-running"') or { -1 }
+	retrying_position := dashboard.body.index('class="board-column queue-retrying"') or { -1 }
+	blocked_position := dashboard.body.index('class="board-column queue-blocked"') or { -1 }
+	in_review_position := dashboard.body.index('class="board-column queue-in-review"') or { -1 }
+	done_position := dashboard.body.index('class="board-column queue-done"') or { -1 }
+	assert running_position < retrying_position
+	assert retrying_position < blocked_position
+	assert blocked_position < in_review_position
+	assert in_review_position < done_position
+	assert dashboard.body.contains('SYM-REVIEW')
 	assert dashboard.body.contains('SYM-DONE')
 	assert dashboard.body.contains('status-done')
 	assert dashboard.body.contains('class="ticket-list"')
@@ -171,7 +206,7 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	assert theme.body.contains('margin-inline: 0')
 	assert theme.body.contains('padding-inline: 0')
 	assert theme.body.contains('.operations-board')
-	assert theme.body.contains('grid-template-columns: repeat(4')
+	assert theme.body.contains('grid-template-columns: repeat(5')
 	assert theme.body.contains('overflow-x: auto')
 	assert theme.body.contains('scroll-snap-type: x proximity')
 	assert theme.body.contains('minmax(85vw, 85vw)')
@@ -188,8 +223,10 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	state_response := http.get('http://127.0.0.1:${port}/api/v1/state')!
 	assert state_response.status_code == 200
 	assert state_response.body.contains('SYM-WEB')
+	assert state_response.body.contains('SYM-REVIEW')
 	assert state_response.body.contains('SYM-DONE')
 	assert state_response.body.contains('"counts"')
+	assert state_response.body.contains('"running":3')
 	assert state_response.body.contains('"completed":1')
 	assert state_response.body.contains('"codex_totals"')
 	issue_response := http.get('http://127.0.0.1:${port}/api/v1/SYM-WEB')!
@@ -234,10 +271,11 @@ fn test_dashboard_renders_all_compact_empty_states() {
 	wait_for_health(port)!
 	dashboard := http.get('http://127.0.0.1:${port}/')!
 	assert dashboard.status_code == 200
-	assert dashboard.body.count('class="board-empty"') == 4
+	assert dashboard.body.count('class="board-empty"') == 5
 	assert dashboard.body.contains('No agents are running right now.')
 	assert dashboard.body.contains('No retries are queued.')
 	assert dashboard.body.contains('No issues are blocked.')
+	assert dashboard.body.contains('No active issues are in review.')
 	assert dashboard.body.contains('No issues are done yet.')
 	stop <- true
 	select {
