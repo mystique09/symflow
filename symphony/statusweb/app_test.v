@@ -129,6 +129,8 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	assert theme.status_code == 200
 	assert (theme.header.get(.content_type) or { '' }) == 'text/css'
 	assert theme.body.contains('--space-1: 0.25rem')
+	assert theme.body.contains('margin-inline: 0')
+	assert theme.body.contains('padding-inline: 0')
 	assert theme.body.contains('.operations-board')
 	assert theme.body.contains('grid-template-columns: repeat(3')
 	assert theme.body.contains('overflow-x: auto')

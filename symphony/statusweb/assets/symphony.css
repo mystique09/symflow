@@ -43,8 +43,11 @@ a:focus-visible,
   padding: var(--space-6) var(--space-5) var(--space-7);
 }
 
-.dashboard-container {
+.container.is-fluid.dashboard-container {
+  margin-inline: 0;
   max-width: none;
+  padding-inline: 0;
+  width: 100%;
 }
 
 .topbar {
