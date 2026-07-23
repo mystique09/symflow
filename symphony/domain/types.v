@@ -27,6 +27,7 @@ pub:
 	blocked_by   []BlockerRef
 	created_at   string
 	updated_at   string
+	completed_at string
 	assignee_id  string
 	native_ref   map[string]json2.Any
 	dispatchable bool = true

@@ -44,6 +44,28 @@ fn test_file_client_id_refresh_preserves_requested_order_and_completed_visibilit
 	assert issues[1].dispatchable
 }
 
+fn test_file_client_lists_only_persisted_completions() {
+	dir := file_tracker_test_dir()
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	write_file_ticket(dir, 'SYM-400.md', 'opaque-400', 'SYM-400', 'Todo', 'pending', 'Pending')!
+	completed_path := write_file_ticket(dir, 'SYM-401.md', 'opaque-401', 'SYM-401',
+		'In Progress', 'completed', 'Completed')!
+	write_file_ticket(dir, 'SYM-402.md', 'opaque-402', 'SYM-402', 'In Review', 'blocked',
+		'Blocked')!
+	content := os.read_file(completed_path)!
+	os.write_file(completed_path, content.replace('completed_at: ""',
+		'completed_at: "2026-07-23T01:00:00Z"'))!
+	client := new_file_client(dir)!
+
+	completed := client.fetch_completed_issues(['Done'])!
+
+	assert completed.map(it.identifier) == ['SYM-401']
+	assert completed[0].completed_at == '2026-07-23T01:00:00Z'
+	assert !completed[0].dispatchable
+}
+
 fn test_file_client_id_refresh_returns_each_requested_ticket_once() {
 	dir := file_tracker_test_dir()
 	defer {

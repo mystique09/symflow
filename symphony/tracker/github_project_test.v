@@ -235,6 +235,15 @@ fn test_github_project_poll_reads_only_issue_items_and_uses_project_status() {
 	assert string_value(issues[0].native_ref, 'project_id') == 'PVT_project'
 }
 
+fn test_github_project_completed_query_uses_terminal_states() {
+	client := github_project_test_client(github_project_transport)
+
+	completed := client.fetch_completed_issues(['Closed'])!
+
+	assert completed.map(it.identifier) == ['octo/example#13']
+	assert completed[0].state == 'Closed'
+}
+
 fn test_github_project_closed_issue_normalizes_to_closed_terminal_state() {
 	client := github_project_test_client(github_project_transport)
 

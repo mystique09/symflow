@@ -81,6 +81,10 @@ pub fn (client GitHubProjectClient) fetch_issues_by_states(states []string) ![]d
 	return snapshot.issues.filter(it.normalized_state() in wanted)
 }
 
+pub fn (client GitHubProjectClient) fetch_completed_issues(terminal_states []string) ![]domain.Issue {
+	return client.fetch_issues_by_states(terminal_states)
+}
+
 pub fn (client GitHubProjectClient) fetch_issues_by_ids(ids []string) ![]domain.Issue {
 	if ids.len == 0 {
 		return []domain.Issue{}

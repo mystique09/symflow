@@ -89,6 +89,18 @@ pub fn (client FileClient) fetch_issues_by_states(states []string) ![]domain.Iss
 	return issues
 }
 
+// fetch_completed_issues returns durable file-backed completion history.
+pub fn (client FileClient) fetch_completed_issues(_ []string) ![]domain.Issue {
+	snapshot := client.load_snapshot()!
+	mut issues := []domain.Issue{}
+	for ticket in snapshot {
+		if ticket.metadata.dispatch_status == 'completed' {
+			issues << issue_from_file_ticket(ticket, client.terminal_states)
+		}
+	}
+	return issues
+}
+
 // fetch_issues_by_ids returns tickets in requested identity order.
 pub fn (client FileClient) fetch_issues_by_ids(ids []string) ![]domain.Issue {
 	if ids.len == 0 {
@@ -335,6 +347,7 @@ fn issue_from_file_ticket(ticket ParsedFileTicket, terminal_states []string) dom
 		blocked_by:   blockers
 		created_at:   metadata.created_at
 		updated_at:   metadata.updated_at
+		completed_at: metadata.completed_at
 		assignee_id:  metadata.assignee_id
 		native_ref:   {
 			'file_path': json2.Any(ticket.path)
