@@ -118,6 +118,21 @@ fn github_project_blocked_transport(request GitHubRequest) !GitHubResponse {
 	return github_project_transport(request)
 }
 
+fn github_project_completion_history_transport(request GitHubRequest) !GitHubResponse {
+	response := github_project_transport(request)!
+	body := if request.body.contains('"after":"CURSOR_1"') {
+		response.body.replace('"fieldValueByName":{"name":"In Progress","optionId":"opt_progress"},"content":{"id":"I_node_2"',
+			'"fieldValueByName":{"name":"Done","optionId":"opt_done"},"content":{"id":"I_node_2"')
+	} else {
+		response.body.replace('"fieldValueByName":{"name":"Todo","optionId":"opt_todo"},"content":{"id":"I_node_3"',
+			'"fieldValueByName":{"name":"Blocked","optionId":"opt_blocked"},"content":{"id":"I_node_3"')
+	}
+	return GitHubResponse{
+		...response
+		body: body
+	}
+}
+
 fn github_project_mutation_failure_transport(request GitHubRequest) !GitHubResponse {
 	if request.body.contains('mutation SymphonyGitHubProjectOutcome') {
 		return GitHubResponse{
@@ -242,6 +257,20 @@ fn test_github_project_completed_query_uses_terminal_states() {
 
 	assert completed.map(it.identifier) == ['octo/example#13']
 	assert completed[0].state == 'Closed'
+}
+
+fn test_github_project_completed_query_uses_success_state_when_writing_outcomes() {
+	client := GitHubProjectClient{
+		...github_project_test_client(github_project_completion_history_transport)
+		write_outcomes: true
+		success_state:  'Done'
+		blocked_state:  'Blocked'
+	}
+
+	completed := client.fetch_completed_issues(['Done', 'Blocked', 'Closed'])!
+
+	assert completed.map(it.identifier) == ['octo/other#2']
+	assert completed.map(it.state) == ['Done']
 }
 
 fn test_github_project_closed_issue_normalizes_to_closed_terminal_state() {

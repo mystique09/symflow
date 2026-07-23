@@ -82,7 +82,8 @@ pub fn (client GitHubProjectClient) fetch_issues_by_states(states []string) ![]d
 }
 
 pub fn (client GitHubProjectClient) fetch_completed_issues(terminal_states []string) ![]domain.Issue {
-	return client.fetch_issues_by_states(terminal_states)
+	states := if client.write_outcomes { [client.success_state] } else { terminal_states }
+	return client.fetch_issues_by_states(states)
 }
 
 pub fn (client GitHubProjectClient) fetch_issues_by_ids(ids []string) ![]domain.Issue {
