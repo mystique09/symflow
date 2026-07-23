@@ -128,6 +128,16 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	theme := http.get('http://127.0.0.1:${port}/assets/symphony.css')!
 	assert theme.status_code == 200
 	assert (theme.header.get(.content_type) or { '' }) == 'text/css'
+	assert theme.body.contains('--space-1: 0.25rem')
+	assert theme.body.contains('.operations-board')
+	assert theme.body.contains('grid-template-columns: repeat(3')
+	assert theme.body.contains('overflow-x: auto')
+	assert theme.body.contains('scroll-snap-type: x proximity')
+	assert theme.body.contains('minmax(85vw, 85vw)')
+	assert theme.body.contains('.ticket-card')
+	assert theme.body.contains('.board-empty')
+	assert !theme.body.contains('.status-card')
+	assert !theme.body.contains('.queue-panel .table')
 	state_response := http.get('http://127.0.0.1:${port}/api/v1/state')!
 	assert state_response.status_code == 200
 	assert state_response.body.contains('SYM-WEB')
