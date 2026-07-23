@@ -156,6 +156,40 @@ fn test_startup_cleanup_removes_terminal_file_workspace_when_dispatch_is_blocked
 	assert !os.exists(issue_workspace)
 }
 
+fn test_startup_cleanup_preserves_completed_file_workspace_in_active_state() {
+	ticket_dir := service_file_tracker_test_dir()
+	workspace_root := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(ticket_dir) or {}
+		os.rmdir_all(workspace_root) or {}
+	}
+	os.write_file(os.join_path(ticket_dir, 'SYM-COMPLETED.md'),
+		'---\nschema_version: 1\nid: "completed-issue"\nidentifier: SYM-COMPLETED\ntitle: "Awaiting operator review"\nstate: Todo\ndispatch_status: completed\nlast_error: ""\ncompleted_at: "2026-07-23T11:00:00Z"\n---\n\nKeep the completed branch for review.\n')!
+	issue_workspace := os.join_path(workspace_root, 'SYM-COMPLETED')
+	os.mkdir_all(issue_workspace)!
+	os.write_file(os.join_path(issue_workspace, 'marker.txt'), 'unmerged work')!
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker:   workflow.TrackerConfig{
+				kind:            'file'
+				provider:        {
+					'root': yaml.Any(ticket_dir)
+				}
+				active_states:   ['Todo']
+				terminal_states: ['Done']
+			}
+			workspace: workflow.WorkspaceConfig{
+				root: workspace_root
+			}
+		}
+	}
+
+	cleanup_terminal_workspaces(definition)!
+
+	assert os.exists(issue_workspace)
+	assert os.read_file(os.join_path(issue_workspace, 'marker.txt'))! == 'unmerged work'
+}
+
 fn test_worker_outcome_stays_bound_to_its_original_tracker_definition() {
 	original_dir := service_file_tracker_test_dir()
 	reloaded_dir := service_file_tracker_test_dir()
