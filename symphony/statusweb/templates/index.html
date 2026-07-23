@@ -7,6 +7,7 @@
   <title>Symphony · Orchestration overview</title>
   @css '/assets/bulma.min.css'
   @css '/assets/symphony.css'
+  <script src="/assets/symphony.js" defer></script>
 </head>
 <body>
   <main class="section dashboard-shell">
@@ -27,7 +28,7 @@
           <h1 class="title is-3 mb-2 overview-title" id="overview-title">Orchestration overview</h1>
           <p class="subtitle is-6 mb-0">Live agent work, retries, and operator blocks.</p>
         </div>
-        <div class="metadata-box" aria-label="Runtime metadata">
+        <div class="metadata-box" data-live-region="metadata" aria-label="Runtime metadata">
           <div class="metadata-row">
             <span>Generated</span>
             @if view.generated_at_iso != ''
@@ -50,7 +51,7 @@
         </div>
       </section>
 
-      <div class="operations-board" role="region" aria-label="Runtime queues" tabindex="0">
+      <div class="operations-board" data-live-region="queues" role="region" aria-label="Runtime queues" tabindex="0">
         <section class="board-column queue-running" aria-labelledby="running-heading">
           <header class="board-column-header">
             <h2 class="title is-5 mb-0 queue-title" id="running-heading">
@@ -170,6 +171,7 @@
           </div>
         </section>
       </div>
+      <p class="is-sr-only" data-live-status aria-live="polite" aria-atomic="true"></p>
 
       <footer class="dashboard-footer">Symphony engineering preview · local orchestration status</footer>
     </div>

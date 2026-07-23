@@ -14,6 +14,7 @@ import symphony.orchestrator
 const response_entry_limit = 1_000
 const bulma_stylesheet = $embed_file('assets/bulma.min.css', .zlib)
 const symphony_stylesheet = $embed_file('assets/symphony.css', .zlib)
+const symphony_script = $embed_file('assets/symphony.js', .zlib)
 
 pub struct ServerConfig {
 pub:
@@ -348,6 +349,12 @@ pub fn (app &App) bulma_css(mut ctx Context) veb.Result {
 pub fn (app &App) symphony_css(mut ctx Context) veb.Result {
 	_ = app
 	return ctx.send_response_to_client('text/css', symphony_stylesheet.to_string())
+}
+
+@['/assets/symphony.js']
+pub fn (app &App) symphony_js(mut ctx Context) veb.Result {
+	_ = app
+	return ctx.send_response_to_client('text/javascript', symphony_script.to_string())
 }
 
 @['/healthz']

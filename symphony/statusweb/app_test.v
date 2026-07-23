@@ -98,6 +98,10 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	assert dashboard.body.contains('href="https://example.test/issues/SYM-WEB?source=web&amp;view=full"')
 	assert dashboard.body.contains('href="/assets/bulma.min.css"')
 	assert dashboard.body.contains('href="/assets/symphony.css"')
+	assert dashboard.body.contains('src="/assets/symphony.js"')
+	assert dashboard.body.contains('data-live-region="metadata"')
+	assert dashboard.body.contains('data-live-region="queues"')
+	assert dashboard.body.contains('aria-live="polite"')
 	assert dashboard.body.contains('<time datetime="')
 	assert dashboard.body.contains('class="section dashboard-shell"')
 	assert dashboard.body.contains('class="operations-board"')
@@ -140,6 +144,12 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	assert theme.body.contains('.board-empty')
 	assert !theme.body.contains('.status-card')
 	assert !theme.body.contains('.queue-panel .table')
+	live_refresh := http.get('http://127.0.0.1:${port}/assets/symphony.js')!
+	assert live_refresh.status_code == 200
+	assert (live_refresh.header.get(.content_type) or { '' }) == 'text/javascript'
+	assert live_refresh.body.contains('fetch(window.location.href')
+	assert live_refresh.body.contains("cache: 'no-store'")
+	assert live_refresh.body.contains('setTimeout(refresh')
 	state_response := http.get('http://127.0.0.1:${port}/api/v1/state')!
 	assert state_response.status_code == 200
 	assert state_response.body.contains('SYM-WEB')
