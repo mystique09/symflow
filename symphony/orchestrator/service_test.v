@@ -264,6 +264,8 @@ fn test_workspace_git_policy_keeps_the_agent_off_protected_branches() {
 	assert prompt.contains('Work only on the prepared issue branch `feature/ops-42`')
 	assert prompt.contains('protected base branch `staging`, `main`, or `master`')
 	assert prompt.contains('Do not push any branch unless the issue or workflow explicitly requires it')
+	assert prompt.contains('Leave the completed issue branch as-is')
+	assert prompt.contains('Do not ask how to merge, push, or clean up the branch')
 	assert prompt.ends_with('Implement the ticket.')
 	assert prepend_workspace_git_policy('Plain prompt.', '', 'main') == 'Plain prompt.'
 }

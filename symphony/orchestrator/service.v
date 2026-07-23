@@ -370,7 +370,7 @@ fn prepend_workspace_git_policy(rendered string, branch string, base_branch stri
 	if branch == '' {
 		return rendered
 	}
-	return 'Git workspace policy:\n- Work only on the prepared issue branch `${branch}`.\n- Do not switch to, commit on, or push the protected base branch `${base_branch}`, `main`, or `master`.\n- Do not push any branch unless the issue or workflow explicitly requires it.\n\n${rendered}'
+	return 'Git workspace policy:\n- Work only on the prepared issue branch `${branch}`.\n- Do not switch to, commit on, or push the protected base branch `${base_branch}`, `main`, or `master`.\n- Do not push any branch unless the issue or workflow explicitly requires it.\n- Leave the completed issue branch as-is for the operator.\n- Do not ask how to merge, push, or clean up the branch; finish the turn after reporting verification.\n\n${rendered}'
 }
 
 fn emit_session(definition workflow.WorkflowDefinition, event string, issue domain.Issue, attempt int, update domain.SessionUpdate) {
