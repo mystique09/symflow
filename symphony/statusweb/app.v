@@ -46,6 +46,7 @@ pub:
 	tokens           ApiTokens
 	due_at           string
 	last_error       string
+	completed_at     string
 }
 
 pub struct ApiTokens {
@@ -60,6 +61,7 @@ pub:
 	running  int
 	retrying int
 	blocked  int
+	completed int
 }
 
 pub struct ApiRunning {
@@ -101,6 +103,15 @@ pub:
 	reason           string
 }
 
+pub struct ApiCompleted {
+pub:
+	issue_id         string
+	issue_identifier string
+	issue_url        string
+	state            string
+	completed_at     string
+}
+
 pub struct ApiCodexTotals {
 pub:
 	input_tokens    i64
@@ -116,6 +127,7 @@ pub:
 	running      []ApiRunning
 	retrying     []ApiRetrying
 	blocked      []ApiBlocked
+	completed    []ApiCompleted
 	codex_totals ApiCodexTotals
 	rate_limits  domain.RateLimitSnapshot
 }
@@ -151,6 +163,7 @@ pub:
 	running          []DashboardRunningRow
 	retrying         []DashboardRetryingRow
 	blocked          []DashboardBlockedRow
+	completed        []DashboardCompletedRow
 }
 
 struct DashboardRunningRow {
@@ -180,6 +193,14 @@ pub:
 	state            string
 	attempt          int
 	reason           string
+}
+
+struct DashboardCompletedRow {
+pub:
+	issue_identifier string
+	issue_url        string
+	state            string
+	completed_at     string
 }
 
 pub fn find_issue(snapshot domain.RuntimeSnapshot, issue_id string) !IssueStatus {
@@ -233,6 +254,19 @@ pub fn find_issue(snapshot domain.RuntimeSnapshot, issue_id string) !IssueStatus
 			}
 		}
 	}
+	for entry in snapshot.completed {
+		if entry.issue_id == issue_id || entry.issue_identifier == issue_id {
+			return IssueStatus{
+				issue_id:         entry.issue_id
+				issue_identifier: entry.issue_identifier
+				issue_url:        entry.issue_url
+				status:           'completed'
+				phase:            'completed'
+				state:            entry.state
+				completed_at:     entry.completed_at
+			}
+		}
+	}
 	return error('issue not found')
 }
 
@@ -244,6 +278,7 @@ pub fn api_state(snapshot domain.RuntimeSnapshot) ApiState {
 			running:  bounded_snapshot.running.len
 			retrying: bounded_snapshot.retrying.len
 			blocked:  bounded_snapshot.blocked.len
+			completed: bounded_snapshot.completed.len
 		}
 		running:      bounded_snapshot.running.map(ApiRunning{
 			issue_id:         it.issue_id
@@ -278,6 +313,13 @@ pub fn api_state(snapshot domain.RuntimeSnapshot) ApiState {
 			attempt:          it.attempt
 			reason:           bounded(it.reason, 2_048)
 		})
+		completed:    bounded_snapshot.completed.map(ApiCompleted{
+			issue_id:         it.issue_id
+			issue_identifier: it.issue_identifier
+			issue_url:        it.issue_url
+			state:            it.state
+			completed_at:     it.completed_at
+		})
 		codex_totals: ApiCodexTotals{
 			input_tokens:    bounded_snapshot.tokens.input
 			output_tokens:   bounded_snapshot.tokens.output
@@ -294,6 +336,7 @@ pub fn api_snapshot(snapshot domain.RuntimeSnapshot) domain.RuntimeSnapshot {
 		running:  snapshot.running[..min_int(snapshot.running.len, response_entry_limit)].clone()
 		retrying: snapshot.retrying[..min_int(snapshot.retrying.len, response_entry_limit)].clone()
 		blocked:  snapshot.blocked[..min_int(snapshot.blocked.len, response_entry_limit)].clone()
+		completed: snapshot.completed[..min_int(snapshot.completed.len, response_entry_limit)].clone()
 	}
 }
 
@@ -396,7 +439,7 @@ pub fn (app &App) issue_by_identifier(mut ctx Context, identifier string) veb.Re
 		return ctx.json(ApiError{
 			error: ApiErrorDetail{
 				code:    'issue_not_found'
-				message: 'no active, retrying, or blocked issue matches `${identifier}`'
+				message: 'no active, retrying, blocked, or completed issue matches `${identifier}`'
 			}
 		})
 	}
@@ -484,6 +527,12 @@ fn dashboard_view(snapshot domain.RuntimeSnapshot) DashboardView {
 			state:            display_text(it.state)
 			attempt:          it.attempt
 			reason:           display_text(bounded(it.reason, 2_048))
+		})
+		completed:        snapshot.completed.map(DashboardCompletedRow{
+			issue_identifier: issue_label(it.issue_identifier)
+			issue_url:        sanitized_issue_url(it.issue_url)
+			state:            display_text(it.state)
+			completed_at:     display_text_or(it.completed_at, 'Not reported')
 		})
 	}
 }

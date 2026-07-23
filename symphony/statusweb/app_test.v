@@ -29,6 +29,26 @@ fn test_find_issue_returns_bounded_state_projection() {
 	assert issue.attempt == 3
 }
 
+fn test_find_issue_returns_completed_projection() {
+	snapshot := domain.RuntimeSnapshot{
+		completed: [
+			domain.CompletedSnapshot{
+				issue_id:         'done-1'
+				issue_identifier: 'SYM-DONE'
+				state:            'Done'
+				completed_at:     '2026-07-23T01:00:00Z'
+			},
+		]
+	}
+
+	issue := find_issue(snapshot, 'SYM-DONE')!
+
+	assert issue.status == 'completed'
+	assert issue.phase == 'completed'
+	assert issue.state == 'Done'
+	assert issue.completed_at == '2026-07-23T01:00:00Z'
+}
+
 fn test_zero_port_resolves_to_an_available_tcp_port() {
 	port := resolve_port('127.0.0.1', 0)!
 	assert port > 0
@@ -48,10 +68,12 @@ fn test_api_snapshot_bounds_each_collection() {
 		running:  []domain.RunningSnapshot{len: 1_005}
 		retrying: []domain.RetrySnapshot{len: 1_006}
 		blocked:  []domain.BlockedSnapshot{len: 1_007}
+		completed: []domain.CompletedSnapshot{len: 1_008}
 	})
 	assert snapshot.running.len == 1_000
 	assert snapshot.retrying.len == 1_000
 	assert snapshot.blocked.len == 1_000
+	assert snapshot.completed.len == 1_000
 }
 
 fn test_try_refresh_is_non_blocking_when_service_is_unavailable() {
@@ -86,6 +108,16 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 		title:      'Exercise template escaping'
 		state:      '<b>Todo</b>'
 	}, 0, time.now().unix_milli())
+	runtime.replace_completed([
+		domain.Issue{
+			id:           'done-route-issue'
+			identifier:   'SYM-DONE'
+			url:          'https://example.test/issues/SYM-DONE'
+			title:        'Completed web route'
+			state:        'Done'
+			completed_at: '2026-07-23T01:00:00Z'
+		},
+	])
 	refresh := chan bool{cap: 1}
 	stop := chan bool{cap: 1}
 	done := chan string{cap: 1}
@@ -109,6 +141,9 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	assert dashboard.body.contains('class="board-column queue-running"')
 	assert dashboard.body.contains('class="board-column queue-retrying"')
 	assert dashboard.body.contains('class="board-column queue-blocked"')
+	assert dashboard.body.contains('class="board-column queue-done"')
+	assert dashboard.body.contains('SYM-DONE')
+	assert dashboard.body.contains('status-done')
 	assert dashboard.body.contains('class="ticket-list"')
 	assert dashboard.body.contains('class="ticket-card"')
 	assert dashboard.body.contains('<dt>State</dt>')
@@ -136,7 +171,7 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	assert theme.body.contains('margin-inline: 0')
 	assert theme.body.contains('padding-inline: 0')
 	assert theme.body.contains('.operations-board')
-	assert theme.body.contains('grid-template-columns: repeat(3')
+	assert theme.body.contains('grid-template-columns: repeat(4')
 	assert theme.body.contains('overflow-x: auto')
 	assert theme.body.contains('scroll-snap-type: x proximity')
 	assert theme.body.contains('minmax(85vw, 85vw)')
@@ -153,12 +188,18 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	state_response := http.get('http://127.0.0.1:${port}/api/v1/state')!
 	assert state_response.status_code == 200
 	assert state_response.body.contains('SYM-WEB')
+	assert state_response.body.contains('SYM-DONE')
 	assert state_response.body.contains('"counts"')
+	assert state_response.body.contains('"completed":1')
 	assert state_response.body.contains('"codex_totals"')
 	issue_response := http.get('http://127.0.0.1:${port}/api/v1/SYM-WEB')!
 	assert issue_response.status_code == 200
 	assert issue_response.body.contains('"phase":"running"')
 	assert issue_response.body.contains('"status":"running"')
+	completed_response := http.get('http://127.0.0.1:${port}/api/v1/SYM-DONE')!
+	assert completed_response.status_code == 200
+	assert completed_response.body.contains('"phase":"completed"')
+	assert completed_response.body.contains('"completed_at":"2026-07-23T01:00:00Z"')
 	missing_response := http.get('http://127.0.0.1:${port}/api/v1/missing')!
 	assert missing_response.status_code == 404
 	assert missing_response.body.contains('"code":"issue_not_found"')
@@ -193,10 +234,11 @@ fn test_dashboard_renders_all_compact_empty_states() {
 	wait_for_health(port)!
 	dashboard := http.get('http://127.0.0.1:${port}/')!
 	assert dashboard.status_code == 200
-	assert dashboard.body.count('class="board-empty"') == 3
+	assert dashboard.body.count('class="board-empty"') == 4
 	assert dashboard.body.contains('No agents are running right now.')
 	assert dashboard.body.contains('No retries are queued.')
 	assert dashboard.body.contains('No issues are blocked.')
+	assert dashboard.body.contains('No issues are done yet.')
 	stop <- true
 	select {
 		message := <-done {

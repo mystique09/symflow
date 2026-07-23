@@ -8,6 +8,7 @@
   --symphony-running: #2f765c;
   --symphony-retrying: #9a6421;
   --symphony-blocked: #a64343;
+  --symphony-done: #356b8c;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -144,7 +145,7 @@ a:focus-visible,
 .operations-board {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(3, minmax(20rem, 1fr));
+  grid-template-columns: repeat(4, minmax(20rem, 1fr));
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   padding: var(--space-1) var(--space-1) var(--space-3);
@@ -188,6 +189,10 @@ a:focus-visible,
 
 .queue-blocked .queue-title {
   color: var(--symphony-blocked);
+}
+
+.queue-done .queue-title {
+  color: var(--symphony-done);
 }
 
 .board-column-body {
@@ -250,6 +255,11 @@ a:focus-visible,
   color: var(--symphony-blocked);
 }
 
+.status-done {
+  background: rgb(53 107 140 / 12%);
+  color: var(--symphony-done);
+}
+
 .ticket-facts {
   display: grid;
   gap: var(--space-2) var(--space-4);
@@ -308,7 +318,7 @@ a:focus-visible,
 
 @media (max-width: 70rem) {
   .operations-board {
-    grid-template-columns: repeat(3, minmax(20rem, 22rem));
+    grid-template-columns: repeat(4, minmax(20rem, 22rem));
   }
 }
 
@@ -330,7 +340,7 @@ a:focus-visible,
   }
 
   .operations-board {
-    grid-template-columns: repeat(3, minmax(85vw, 85vw));
+    grid-template-columns: repeat(4, minmax(85vw, 85vw));
     scroll-snap-type: x mandatory;
   }
 
