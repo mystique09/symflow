@@ -1,11 +1,23 @@
 module orchestrator
 
 import os
+import net.http
 import time
 import yaml
 import symphony.domain
 import symphony.tracker
 import symphony.workflow
+
+struct TerminalLinearHandler {}
+
+fn (mut handler TerminalLinearHandler) handle(_ http.Request) http.Response {
+	_ = handler
+	mut response := http.Response{
+		body: '{"data":{"issues":{"nodes":[{"id":"linear-terminal","identifier":"SYM-LINEAR","title":"Terminal while offline","state":{"name":"Done"},"labels":{"nodes":[]},"inverseRelations":{"nodes":[]},"createdAt":"2026-07-22T01:00:00Z","updatedAt":"2026-07-23T01:00:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}'
+	}
+	response.set_status(.ok)
+	return response
+}
 
 struct NonDispatchableTracker {
 	issue domain.Issue
@@ -21,6 +33,10 @@ fn (_ NonDispatchableTracker) fetch_issues_by_ids(_ []string) ![]domain.Issue {
 
 fn (_ NonDispatchableTracker) fetch_completed_issues(_ []string) ![]domain.Issue {
 	return []domain.Issue{}
+}
+
+fn (_ NonDispatchableTracker) completed_issues_preserve_workspaces() bool {
+	return false
 }
 
 fn (_ NonDispatchableTracker) record_outcome(_ domain.Issue, _ domain.AttemptOutcome) !bool {
@@ -222,6 +238,48 @@ fn test_startup_cleanup_preserves_completed_file_workspace_in_terminal_state() {
 
 	assert os.exists(issue_workspace)
 	assert os.read_file(os.join_path(issue_workspace, 'marker.txt'))! == 'successful unmerged work'
+}
+
+fn test_startup_cleanup_removes_read_only_linear_terminal_workspace() {
+	workspace_root := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(workspace_root) or {}
+	}
+	issue_workspace := os.join_path(workspace_root, 'SYM-LINEAR')
+	os.mkdir_all(issue_workspace)!
+	os.write_file(os.join_path(issue_workspace, 'marker.txt'), 'stale terminal work')!
+	mut server := &http.Server{
+		accept_timeout:       100 * time.millisecond
+		handler:              TerminalLinearHandler{}
+		addr:                 '127.0.0.1:0'
+		show_startup_message: false
+	}
+	server_thread := spawn server.listen_and_serve()
+	server.wait_till_running()!
+	defer {
+		server.stop()
+		server_thread.wait()
+	}
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker:   workflow.TrackerConfig{
+				kind:            'linear'
+				provider:        {
+					'endpoint':     yaml.Any('http://${server.addr}')
+					'api_key':      yaml.Any('test-token')
+					'project_slug': yaml.Any('test-project')
+				}
+				terminal_states: ['Done']
+			}
+			workspace: workflow.WorkspaceConfig{
+				root: workspace_root
+			}
+		}
+	}
+
+	cleanup_terminal_workspaces(definition)!
+
+	assert !os.exists(issue_workspace)
 }
 
 fn test_worker_outcome_stays_bound_to_its_original_tracker_definition() {

@@ -60,6 +60,7 @@ fn test_file_client_lists_only_persisted_completions() {
 
 	completed := client.fetch_completed_issues(['Done'])!
 
+	assert client.completed_issues_preserve_workspaces()
 	assert completed.map(it.identifier) == ['SYM-401']
 	assert completed[0].completed_at == '2026-07-23T01:00:00Z'
 	assert !completed[0].dispatchable

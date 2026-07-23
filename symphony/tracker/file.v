@@ -102,6 +102,11 @@ pub fn (client FileClient) fetch_completed_issues(_ []string) ![]domain.Issue {
 	return issues
 }
 
+// completed_issues_preserve_workspaces identifies durable agent completions.
+pub fn (_ FileClient) completed_issues_preserve_workspaces() bool {
+	return true
+}
+
 // fetch_issues_by_ids returns tickets in requested identity order.
 pub fn (client FileClient) fetch_issues_by_ids(ids []string) ![]domain.Issue {
 	if ids.len == 0 {

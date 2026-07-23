@@ -175,6 +175,7 @@ fn test_linear_completed_query_uses_terminal_states() {
 
 	completed := client.fetch_completed_issues(['Done'])!
 
+	assert !client.completed_issues_preserve_workspaces()
 	assert completed.map(it.identifier) == ['OPS-3']
 	assert completed[0].state == 'Done'
 }

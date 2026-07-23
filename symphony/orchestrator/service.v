@@ -155,10 +155,12 @@ fn reconcile_blocked(definition workflow.WorkflowDefinition, runtime Runtime, cl
 
 fn cleanup_terminal_workspaces(definition workflow.WorkflowDefinition) ! {
 	client := tracker.new_adapter(definition.config.tracker)!
-	completed := client.fetch_completed_issues(definition.config.tracker.terminal_states)!
 	mut completed_ids := map[string]bool{}
-	for issue in completed {
-		completed_ids[issue.id] = true
+	if client.completed_issues_preserve_workspaces() {
+		completed := client.fetch_completed_issues(definition.config.tracker.terminal_states)!
+		for issue in completed {
+			completed_ids[issue.id] = true
+		}
 	}
 	issues := client.fetch_issues_by_states(definition.config.tracker.terminal_states)!
 	for issue in issues {

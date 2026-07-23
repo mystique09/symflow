@@ -255,6 +255,7 @@ fn test_github_project_completed_query_uses_terminal_states() {
 
 	completed := client.fetch_completed_issues(['Closed'])!
 
+	assert !client.completed_issues_preserve_workspaces()
 	assert completed.map(it.identifier) == ['octo/example#13']
 	assert completed[0].state == 'Closed'
 }
@@ -269,6 +270,7 @@ fn test_github_project_completed_query_uses_success_state_when_writing_outcomes(
 
 	completed := client.fetch_completed_issues(['Done', 'Blocked', 'Closed'])!
 
+	assert client.completed_issues_preserve_workspaces()
 	assert completed.map(it.identifier) == ['octo/other#2']
 	assert completed.map(it.state) == ['Done']
 }
