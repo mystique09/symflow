@@ -61,6 +61,10 @@ The accepted dispatch statuses are:
 - `completed`: retained for history and never dispatched;
 - `blocked`: retained for operator attention and never dispatched.
 
+Completed tickets are loaded into the dashboard's Done column on every tracker
+poll, including after Symphony restarts. Pending tickets remain absent from the
+dashboard until an agent claims them.
+
 Pending Todo tickets are dispatchable only when every `blocked_by` entry is in
 one of `tracker.terminal_states`. A blank blocker state is treated as unresolved
 and prevents dispatch. Blockers remain informational for later workflow states,
@@ -100,7 +104,8 @@ completed_at: ""
 
 Save the file, then restart Symphony or call `POST /api/v1/refresh`. To resolve a
 blocked ticket without rerunning it, set `dispatch_status: completed` and add a
-`completed_at` timestamp manually.
+`completed_at` timestamp manually. The next tracker poll moves it from Blocked
+to Done in the dashboard.
 
 Use `build/symphony doctor WORKFLOW.md` to validate the adapter and directory
 without dispatching anything. `build/symphony run WORKFLOW.md --once` is not a
