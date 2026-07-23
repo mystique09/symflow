@@ -22,164 +22,151 @@
         </div>
       </nav>
 
-      <section class="hero is-small overview-hero" aria-labelledby="overview-title">
-        <div class="hero-body">
-          <div class="columns is-variable is-6 is-vcentered">
-            <div class="column">
-              <p class="eyebrow mb-4">Local agent operations</p>
-              <h1 class="title overview-title mb-4" id="overview-title">Orchestration overview</h1>
-              <p class="subtitle is-5">Agent activity across the issue queue, from active work through retries and operator blocks.</p>
-            </div>
-            <div class="column is-narrow">
-              <div class="box metadata-box" aria-label="Runtime metadata">
-                <div class="metadata-row">
-                  <span>Generated</span>
-                  @if view.generated_at_iso != ''
-                  <time datetime="@view.generated_at_iso"><strong>@view.generated_at</strong></time>
-                  @else
-                  <strong>@view.generated_at</strong>
-                  @endif
-                </div>
-                <div class="metadata-row"><span>Runtime</span><strong>@view.runtime_seconds</strong></div>
-                <div class="metadata-row"><span>Tokens</span><strong>@view.total_tokens</strong></div>
-                <div class="metadata-row"><span>Rate used</span><strong>@view.rate_used</strong></div>
-                <div class="metadata-row">
-                  <span>Rate reset</span>
-                  @if view.rate_reset_iso != ''
-                  <time datetime="@view.rate_reset_iso"><strong>@view.rate_reset</strong></time>
-                  @else
-                  <strong>@view.rate_reset</strong>
-                  @endif
-                </div>
-              </div>
-            </div>
+      <section class="overview-header" aria-labelledby="overview-title">
+        <div class="overview-copy">
+          <h1 class="title is-3 mb-2 overview-title" id="overview-title">Orchestration overview</h1>
+          <p class="subtitle is-6 mb-0">Live agent work, retries, and operator blocks.</p>
+        </div>
+        <div class="metadata-box" aria-label="Runtime metadata">
+          <div class="metadata-row">
+            <span>Generated</span>
+            @if view.generated_at_iso != ''
+            <time datetime="@view.generated_at_iso"><strong>@view.generated_at</strong></time>
+            @else
+            <strong>@view.generated_at</strong>
+            @endif
+          </div>
+          <div class="metadata-row"><span>Runtime</span><strong>@view.runtime_seconds</strong></div>
+          <div class="metadata-row"><span>Tokens</span><strong>@view.total_tokens</strong></div>
+          <div class="metadata-row"><span>Rate used</span><strong>@view.rate_used</strong></div>
+          <div class="metadata-row">
+            <span>Rate reset</span>
+            @if view.rate_reset_iso != ''
+            <time datetime="@view.rate_reset_iso"><strong>@view.rate_reset</strong></time>
+            @else
+            <strong>@view.rate_reset</strong>
+            @endif
           </div>
         </div>
       </section>
 
-      <section class="columns is-variable is-4" aria-label="Queue totals">
-        <div class="column">
-          <article class="box status-card status-card-running">
-            <p class="heading status-heading"><span class="queue-dot" aria-hidden="true"></span>Running</p>
-            <p class="title is-2 mb-2">@{view.running.len}</p>
-            <p class="has-text-grey">Agents working now</p>
-          </article>
-        </div>
-        <div class="column">
-          <article class="box status-card status-card-retrying">
-            <p class="heading status-heading"><span class="queue-dot" aria-hidden="true"></span>Retrying</p>
-            <p class="title is-2 mb-2">@{view.retrying.len}</p>
-            <p class="has-text-grey">Attempts waiting to resume</p>
-          </article>
-        </div>
-        <div class="column">
-          <article class="box status-card status-card-blocked">
-            <p class="heading status-heading"><span class="queue-dot" aria-hidden="true"></span>Blocked</p>
-            <p class="title is-2 mb-2">@{view.blocked.len}</p>
-            <p class="has-text-grey">Issues needing attention</p>
-          </article>
-        </div>
-      </section>
-
-      <div class="queue-stack mt-5">
-        <section class="box queue-panel queue-running" aria-labelledby="running-heading">
-          <header class="queue-header">
-            <h2 class="title is-5 mb-0 queue-title" id="running-heading"><span class="queue-dot" aria-hidden="true"></span>Running</h2>
-            <span class="tag is-success is-light is-rounded">@{view.running.len}</span>
+      <div class="operations-board" role="region" aria-label="Runtime queues" tabindex="0">
+        <section class="board-column queue-running" aria-labelledby="running-heading">
+          <header class="board-column-header">
+            <h2 class="title is-5 mb-0 queue-title" id="running-heading">
+              <span class="queue-dot" aria-hidden="true"></span>Running
+            </h2>
+            <span class="tag is-success is-light is-rounded" aria-label="@{view.running.len} running issues">@{view.running.len}</span>
           </header>
-          <div class="table-container">
-            <table class="table is-fullwidth is-hoverable" aria-label="Running issues">
-              <thead><tr><th>Issue</th><th>Status</th><th>State</th><th>Attempt</th><th>Turns</th><th>Last event</th><th>Tokens</th></tr></thead>
-              <tbody>
-              @if view.running.len == 0
-                <tr><td class="has-text-centered has-text-grey py-6" colspan="7">No agents are running right now.</td></tr>
-              @else
-                @for entry in view.running
-                <tr>
-                  <td>
+          <div class="board-column-body">
+            @if view.running.len == 0
+            <p class="board-empty">No agents are running right now.</p>
+            @else
+            <ul class="ticket-list" aria-label="Running issues">
+              @for entry in view.running
+              <li>
+                <article class="ticket-card">
+                  <header class="ticket-card-header">
                     @if entry.issue_url != ''
                     <a class="issue-reference" href="@{entry.issue_url}" target="_blank" rel="noreferrer">@entry.issue_identifier</a>
                     @else
                     <span class="issue-reference">@entry.issue_identifier</span>
                     @endif
-                  </td>
-                  <td><span class="tag is-success is-light is-rounded">Running</span></td>
-                  <td>@entry.state</td>
-                  <td class="numeric">@entry.attempt</td>
-                  <td class="numeric">@entry.turn_count</td>
-                  <td class="runtime-message">@entry.last_event</td>
-                  <td class="numeric">@entry.tokens</td>
-                </tr>
-                @endfor
-              @endif
-              </tbody>
-            </table>
+                    <span class="status-label status-running">Running</span>
+                  </header>
+                  <dl class="ticket-facts">
+                    <div><dt>State</dt><dd>@entry.state</dd></div>
+                    <div><dt>Attempt</dt><dd class="numeric">@entry.attempt</dd></div>
+                    <div><dt>Turns</dt><dd class="numeric">@entry.turn_count</dd></div>
+                    <div><dt>Tokens</dt><dd class="numeric">@entry.tokens</dd></div>
+                  </dl>
+                  <div class="ticket-message">
+                    <span class="ticket-message-label">Last event</span>
+                    <p class="runtime-message">@entry.last_event</p>
+                  </div>
+                </article>
+              </li>
+              @endfor
+            </ul>
+            @endif
           </div>
         </section>
 
-        <section class="box queue-panel queue-retrying" aria-labelledby="retrying-heading">
-          <header class="queue-header">
-            <h2 class="title is-5 mb-0 queue-title" id="retrying-heading"><span class="queue-dot" aria-hidden="true"></span>Retrying</h2>
-            <span class="tag is-warning is-light is-rounded">@{view.retrying.len}</span>
+        <section class="board-column queue-retrying" aria-labelledby="retrying-heading">
+          <header class="board-column-header">
+            <h2 class="title is-5 mb-0 queue-title" id="retrying-heading">
+              <span class="queue-dot" aria-hidden="true"></span>Retrying
+            </h2>
+            <span class="tag is-warning is-light is-rounded" aria-label="@{view.retrying.len} retrying issues">@{view.retrying.len}</span>
           </header>
-          <div class="table-container">
-            <table class="table is-fullwidth is-hoverable" aria-label="Retrying issues">
-              <thead><tr><th>Issue</th><th>Status</th><th>Attempt</th><th>Due</th><th>Last error</th></tr></thead>
-              <tbody>
-              @if view.retrying.len == 0
-                <tr><td class="has-text-centered has-text-grey py-6" colspan="5">No retries are queued.</td></tr>
-              @else
-                @for entry in view.retrying
-                <tr>
-                  <td>
+          <div class="board-column-body">
+            @if view.retrying.len == 0
+            <p class="board-empty">No retries are queued.</p>
+            @else
+            <ul class="ticket-list" aria-label="Retrying issues">
+              @for entry in view.retrying
+              <li>
+                <article class="ticket-card">
+                  <header class="ticket-card-header">
                     @if entry.issue_url != ''
                     <a class="issue-reference" href="@{entry.issue_url}" target="_blank" rel="noreferrer">@entry.issue_identifier</a>
                     @else
                     <span class="issue-reference">@entry.issue_identifier</span>
                     @endif
-                  </td>
-                  <td><span class="tag is-warning is-light is-rounded">Retrying</span></td>
-                  <td class="numeric">@entry.attempt</td>
-                  <td>@entry.due_at</td>
-                  <td class="runtime-message">@entry.last_error</td>
-                </tr>
-                @endfor
-              @endif
-              </tbody>
-            </table>
+                    <span class="status-label status-retrying">Retrying</span>
+                  </header>
+                  <dl class="ticket-facts">
+                    <div><dt>Attempt</dt><dd class="numeric">@entry.attempt</dd></div>
+                    <div><dt>Due</dt><dd>@entry.due_at</dd></div>
+                  </dl>
+                  <div class="ticket-message">
+                    <span class="ticket-message-label">Last error</span>
+                    <p class="runtime-message">@entry.last_error</p>
+                  </div>
+                </article>
+              </li>
+              @endfor
+            </ul>
+            @endif
           </div>
         </section>
 
-        <section class="box queue-panel queue-blocked" aria-labelledby="blocked-heading">
-          <header class="queue-header">
-            <h2 class="title is-5 mb-0 queue-title" id="blocked-heading"><span class="queue-dot" aria-hidden="true"></span>Blocked</h2>
-            <span class="tag is-danger is-light is-rounded">@{view.blocked.len}</span>
+        <section class="board-column queue-blocked" aria-labelledby="blocked-heading">
+          <header class="board-column-header">
+            <h2 class="title is-5 mb-0 queue-title" id="blocked-heading">
+              <span class="queue-dot" aria-hidden="true"></span>Blocked
+            </h2>
+            <span class="tag is-danger is-light is-rounded" aria-label="@{view.blocked.len} blocked issues">@{view.blocked.len}</span>
           </header>
-          <div class="table-container">
-            <table class="table is-fullwidth is-hoverable" aria-label="Blocked issues">
-              <thead><tr><th>Issue</th><th>Status</th><th>State</th><th>Attempt</th><th>Reason</th></tr></thead>
-              <tbody>
-              @if view.blocked.len == 0
-                <tr><td class="has-text-centered has-text-grey py-6" colspan="5">No issues are blocked.</td></tr>
-              @else
-                @for entry in view.blocked
-                <tr>
-                  <td>
+          <div class="board-column-body">
+            @if view.blocked.len == 0
+            <p class="board-empty">No issues are blocked.</p>
+            @else
+            <ul class="ticket-list" aria-label="Blocked issues">
+              @for entry in view.blocked
+              <li>
+                <article class="ticket-card">
+                  <header class="ticket-card-header">
                     @if entry.issue_url != ''
                     <a class="issue-reference" href="@{entry.issue_url}" target="_blank" rel="noreferrer">@entry.issue_identifier</a>
                     @else
                     <span class="issue-reference">@entry.issue_identifier</span>
                     @endif
-                  </td>
-                  <td><span class="tag is-danger is-light is-rounded">Blocked</span></td>
-                  <td>@entry.state</td>
-                  <td class="numeric">@entry.attempt</td>
-                  <td class="runtime-message">@entry.reason</td>
-                </tr>
-                @endfor
-              @endif
-              </tbody>
-            </table>
+                    <span class="status-label status-blocked">Blocked</span>
+                  </header>
+                  <dl class="ticket-facts">
+                    <div><dt>State</dt><dd>@entry.state</dd></div>
+                    <div><dt>Attempt</dt><dd class="numeric">@entry.attempt</dd></div>
+                  </dl>
+                  <div class="ticket-message">
+                    <span class="ticket-message-label">Reason</span>
+                    <p class="runtime-message">@entry.reason</p>
+                  </div>
+                </article>
+              </li>
+              @endfor
+            </ul>
+            @endif
           </div>
         </section>
       </div>
