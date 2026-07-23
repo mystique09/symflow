@@ -171,6 +171,34 @@ fn test_http_routes_expose_snapshot_and_accept_refresh() {
 	runtime.shutdown()
 }
 
+fn test_dashboard_renders_all_compact_empty_states() {
+	mut listener := net.listen_tcp(.ip, '127.0.0.1:0')!
+	port := int(listener.addr()!.port()!)
+	listener.close()!
+	runtime := orchestrator.start_runtime(1, 60_000)
+	refresh := chan bool{cap: 1}
+	stop := chan bool{cap: 1}
+	done := chan string{cap: 1}
+	spawn serve_for_test(runtime, refresh, stop, done, port)
+	wait_for_health(port)!
+	dashboard := http.get('http://127.0.0.1:${port}/')!
+	assert dashboard.status_code == 200
+	assert dashboard.body.count('class="board-empty"') == 3
+	assert dashboard.body.contains('No agents are running right now.')
+	assert dashboard.body.contains('No retries are queued.')
+	assert dashboard.body.contains('No issues are blocked.')
+	stop <- true
+	select {
+		message := <-done {
+			assert message == ''
+		}
+		6 * time.second {
+			assert false, 'status server did not stop'
+		}
+	}
+	runtime.shutdown()
+}
+
 fn test_server_stops_when_requested_during_startup() {
 	mut listener := net.listen_tcp(.ip, '127.0.0.1:0')!
 	port := int(listener.addr()!.port()!)
