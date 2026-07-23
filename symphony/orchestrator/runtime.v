@@ -7,6 +7,8 @@ enum CommandKind {
 	finish
 	release
 	release_blocked
+	complete
+	replace_completed
 	defer_retry
 	activate_retry
 	update_issue
@@ -19,6 +21,7 @@ enum CommandKind {
 struct Command {
 	kind           CommandKind
 	issue          domain.Issue
+	issues         []domain.Issue
 	update         domain.SessionUpdate
 	issue_id       string
 	outcome        domain.AttemptOutcome
@@ -96,6 +99,26 @@ pub fn (runtime Runtime) release_blocked() int {
 		int_reply: reply
 	}
 	return <-reply
+}
+
+pub fn (runtime Runtime) complete(issue domain.Issue) {
+	reply := chan bool{cap: 1}
+	runtime.commands <- Command{
+		kind:       .complete
+		issue:      issue
+		bool_reply: reply
+	}
+	_ := <-reply
+}
+
+pub fn (runtime Runtime) replace_completed(issues []domain.Issue) {
+	reply := chan bool{cap: 1}
+	runtime.commands <- Command{
+		kind:       .replace_completed
+		issues:     issues
+		bool_reply: reply
+	}
+	_ := <-reply
 }
 
 pub fn (runtime Runtime) defer_retry(issue_id string, due_at_ms i64, reason string) bool {
@@ -188,6 +211,14 @@ fn runtime_loop(initial State, commands chan Command) {
 			}
 			.release_blocked {
 				command.int_reply <- state.release_blocked()
+			}
+			.complete {
+				state.complete(command.issue)
+				command.bool_reply <- true
+			}
+			.replace_completed {
+				state.replace_completed(command.issues)
+				command.bool_reply <- true
 			}
 			.defer_retry {
 				state.defer_retry(command.issue_id, command.due_at_ms, command.error_message) or {

@@ -111,11 +111,16 @@ fn poll_and_dispatch(definition workflow.WorkflowDefinition, runtime Runtime, ev
 	}
 	client := tracker.new_adapter(config.tracker)!
 	policy := scheduling_policy(config)
+	sync_completed(runtime, client, config.tracker.terminal_states)!
 	reconcile_running(definition, runtime, client, policy, mut cancellations, mut
 		remove_after_finish)!
 	reconcile_blocked(definition, runtime, client, policy)!
 	activate_due_retries(definition, runtime, client, policy, events, mut cancellations)!
 	dispatch_candidates(definition, runtime, client, policy, events, mut cancellations)!
+}
+
+fn sync_completed(runtime Runtime, client tracker.Tracker, terminal_states []string) ! {
+	runtime.replace_completed(client.fetch_completed_issues(terminal_states)!)
 }
 
 fn reconcile_blocked(definition workflow.WorkflowDefinition, runtime Runtime, client tracker.Tracker, policy scheduler.Policy) ! {
@@ -150,7 +155,7 @@ fn reconcile_blocked(definition workflow.WorkflowDefinition, runtime Runtime, cl
 
 fn cleanup_terminal_workspaces(definition workflow.WorkflowDefinition) ! {
 	client := tracker.new_adapter(definition.config.tracker)!
-	issues := client.fetch_issues_by_states(definition.config.tracker.terminal_states)!
+	issues := client.fetch_completed_issues(definition.config.tracker.terminal_states)!
 	for issue in issues {
 		remove_issue_workspace(definition, issue) or {
 			emit(definition, 'warn', 'workspace_cleanup_failed', issue, 0, err.msg())
@@ -421,7 +426,10 @@ fn handle_worker_event(runtime Runtime, event WorkerEvent, mut cancellations map
 	completion_persisted := persist_tracker_outcome(definition, event)
 	runtime.finish(event.outcome, time.now().unix_milli())
 	if completion_persisted && event.outcome.kind == .succeeded {
-		runtime.release(event.issue.id)
+		runtime.complete(domain.Issue{
+			...event.issue
+			completed_at: time.utc().format_rfc3339()
+		})
 	}
 	if remove_after_finish[event.issue.id] {
 		remove_issue_workspace(definition, event.issue) or {

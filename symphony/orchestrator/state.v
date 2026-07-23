@@ -31,6 +31,10 @@ struct BlockedEntry {
 	reason  string
 }
 
+struct CompletedEntry {
+	issue domain.Issue
+}
+
 pub struct Attempt {
 pub:
 	issue   domain.Issue
@@ -45,6 +49,7 @@ mut:
 	claimed         map[string]bool
 	retries         map[string]RetryEntry
 	blocked         map[string]BlockedEntry
+	completed       map[string]CompletedEntry
 	tokens          domain.TokenTotals
 	rate_limit      domain.RateLimitSnapshot
 	runtime_seconds f64
@@ -66,6 +71,7 @@ pub fn new_state(max_concurrent int, max_backoff_ms int) State {
 		claimed:        map[string]bool{}
 		retries:        map[string]RetryEntry{}
 		blocked:        map[string]BlockedEntry{}
+		completed:      map[string]CompletedEntry{}
 	}
 }
 
@@ -193,6 +199,25 @@ pub fn (mut state State) release(issue_id string) {
 	state.claimed.delete(issue_id)
 }
 
+pub fn (mut state State) complete(issue domain.Issue) {
+	state.release(issue.id)
+	state.completed[issue.id] = CompletedEntry{
+		issue: issue
+	}
+}
+
+pub fn (mut state State) replace_completed(issues []domain.Issue) {
+	mut completed := map[string]CompletedEntry{}
+	for issue in issues {
+		if issue.id != '' {
+			completed[issue.id] = CompletedEntry{
+				issue: issue
+			}
+		}
+	}
+	state.completed = completed.move()
+}
+
 pub fn (mut state State) release_blocked() int {
 	ids := state.blocked.keys()
 	for issue_id in ids {
@@ -311,10 +336,22 @@ pub fn (state &State) snapshot(now_ms i64) domain.RuntimeSnapshot {
 		}
 	}
 	blocked.sort(a.issue_identifier < b.issue_identifier)
+	mut completed := []domain.CompletedSnapshot{}
+	for _, entry in state.completed {
+		completed << domain.CompletedSnapshot{
+			issue_id:         entry.issue.id
+			issue_identifier: entry.issue.identifier
+			issue_url:        entry.issue.url
+			state:            entry.issue.state
+			completed_at:     entry.issue.completed_at
+		}
+	}
+	completed.sort(a.issue_identifier < b.issue_identifier)
 	return domain.RuntimeSnapshot{
 		running:      running
 		retrying:     retrying
 		blocked:      blocked
+		completed:    completed
 		tokens:       state.tokens
 		rate_limit:   state.rate_limit
 		runtime_secs: state.runtime_seconds + active_runtime_seconds

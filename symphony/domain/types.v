@@ -167,11 +167,21 @@ pub:
 	reason           string
 }
 
+pub struct CompletedSnapshot {
+pub:
+	issue_id         string
+	issue_identifier string
+	issue_url        string
+	state            string
+	completed_at     string
+}
+
 pub struct RuntimeSnapshot {
 pub:
 	running      []RunningSnapshot
 	retrying     []RetrySnapshot
 	blocked      []BlockedSnapshot
+	completed    []CompletedSnapshot
 	tokens       TokenTotals
 	rate_limit   RateLimitSnapshot
 	runtime_secs f64

@@ -19,6 +19,10 @@ fn (_ NonDispatchableTracker) fetch_issues_by_ids(_ []string) ![]domain.Issue {
 	return []domain.Issue{}
 }
 
+fn (_ NonDispatchableTracker) fetch_completed_issues(_ []string) ![]domain.Issue {
+	return []domain.Issue{}
+}
+
 fn (_ NonDispatchableTracker) record_outcome(_ domain.Issue, _ domain.AttemptOutcome) !bool {
 	return false
 }
@@ -77,7 +81,47 @@ fn test_successful_file_outcome_releases_claim_without_continuation() {
 	snapshot := runtime.snapshot(2_000)
 	assert snapshot.running.len == 0
 	assert snapshot.retrying.len == 0
+	assert snapshot.completed.map(it.issue_identifier) == ['SYM-400']
 	assert os.read_file(ticket_path)!.contains('dispatch_status: completed')
+}
+
+fn test_poll_syncs_persisted_file_completions_after_restart() {
+	dir := service_file_tracker_test_dir()
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	os.write_file(os.join_path(dir, 'SYM-401.md'),
+		'---\nschema_version: 1\nid: "opaque-401"\nidentifier: SYM-401\ntitle: "Already done"\nstate: Todo\ndispatch_status: completed\nlast_error: ""\ncompleted_at: "2026-07-23T01:00:00Z"\n---\n\nCompleted earlier.\n')!
+	definition := workflow.WorkflowDefinition{
+		config: workflow.Config{
+			tracker: workflow.TrackerConfig{
+				kind:            'file'
+				provider:        {
+					'root': yaml.Any(dir)
+				}
+				active_states:   ['Todo']
+				terminal_states: ['Done']
+			}
+			agent:   workflow.AgentConfig{
+				max_concurrent_agents: 1
+				max_retry_backoff_ms:  300_000
+			}
+		}
+	}
+	runtime := start_runtime(1, 300_000)
+	defer {
+		runtime.shutdown()
+	}
+	mut cancellations := map[string]chan bool{}
+	mut remove_after_finish := map[string]bool{}
+
+	poll_and_dispatch(definition, runtime, chan WorkerEvent{cap: 1}, mut cancellations,
+		mut remove_after_finish)!
+
+	completed := runtime.snapshot(2_000).completed
+	assert completed.map(it.issue_identifier) == ['SYM-401']
+	assert completed[0].completed_at == '2026-07-23T01:00:00Z'
+	assert cancellations.len == 0
 }
 
 fn test_worker_outcome_stays_bound_to_its_original_tracker_definition() {
