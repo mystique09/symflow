@@ -65,9 +65,9 @@ fn test_find_issue_reports_missing_id() {
 
 fn test_api_snapshot_bounds_each_collection() {
 	snapshot := api_snapshot(domain.RuntimeSnapshot{
-		running:  []domain.RunningSnapshot{len: 1_005}
-		retrying: []domain.RetrySnapshot{len: 1_006}
-		blocked:  []domain.BlockedSnapshot{len: 1_007}
+		running:   []domain.RunningSnapshot{len: 1_005}
+		retrying:  []domain.RetrySnapshot{len: 1_006}
+		blocked:   []domain.BlockedSnapshot{len: 1_007}
 		completed: []domain.CompletedSnapshot{len: 1_008}
 	})
 	assert snapshot.running.len == 1_000

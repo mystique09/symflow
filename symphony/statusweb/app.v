@@ -58,9 +58,9 @@ pub:
 
 pub struct ApiCounts {
 pub:
-	running  int
-	retrying int
-	blocked  int
+	running   int
+	retrying  int
+	blocked   int
 	completed int
 }
 
@@ -275,9 +275,9 @@ pub fn api_state(snapshot domain.RuntimeSnapshot) ApiState {
 	return ApiState{
 		generated_at: format_millis(bounded_snapshot.generated_at)
 		counts:       ApiCounts{
-			running:  bounded_snapshot.running.len
-			retrying: bounded_snapshot.retrying.len
-			blocked:  bounded_snapshot.blocked.len
+			running:   bounded_snapshot.running.len
+			retrying:  bounded_snapshot.retrying.len
+			blocked:   bounded_snapshot.blocked.len
 			completed: bounded_snapshot.completed.len
 		}
 		running:      bounded_snapshot.running.map(ApiRunning{
@@ -333,9 +333,9 @@ pub fn api_state(snapshot domain.RuntimeSnapshot) ApiState {
 pub fn api_snapshot(snapshot domain.RuntimeSnapshot) domain.RuntimeSnapshot {
 	return domain.RuntimeSnapshot{
 		...snapshot
-		running:  snapshot.running[..min_int(snapshot.running.len, response_entry_limit)].clone()
-		retrying: snapshot.retrying[..min_int(snapshot.retrying.len, response_entry_limit)].clone()
-		blocked:  snapshot.blocked[..min_int(snapshot.blocked.len, response_entry_limit)].clone()
+		running:   snapshot.running[..min_int(snapshot.running.len, response_entry_limit)].clone()
+		retrying:  snapshot.retrying[..min_int(snapshot.retrying.len, response_entry_limit)].clone()
+		blocked:   snapshot.blocked[..min_int(snapshot.blocked.len, response_entry_limit)].clone()
 		completed: snapshot.completed[..min_int(snapshot.completed.len, response_entry_limit)].clone()
 	}
 }

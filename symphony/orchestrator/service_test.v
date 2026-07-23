@@ -115,8 +115,8 @@ fn test_poll_syncs_persisted_file_completions_after_restart() {
 	mut cancellations := map[string]chan bool{}
 	mut remove_after_finish := map[string]bool{}
 
-	poll_and_dispatch(definition, runtime, chan WorkerEvent{cap: 1}, mut cancellations,
-		mut remove_after_finish)!
+	poll_and_dispatch(definition, runtime, chan WorkerEvent{cap: 1}, mut cancellations, mut
+		remove_after_finish)!
 
 	completed := runtime.snapshot(2_000).completed
 	assert completed.map(it.issue_identifier) == ['SYM-401']

@@ -50,10 +50,9 @@ fn test_file_client_lists_only_persisted_completions() {
 		os.rmdir_all(dir) or {}
 	}
 	write_file_ticket(dir, 'SYM-400.md', 'opaque-400', 'SYM-400', 'Todo', 'pending', 'Pending')!
-	completed_path := write_file_ticket(dir, 'SYM-401.md', 'opaque-401', 'SYM-401',
-		'In Progress', 'completed', 'Completed')!
-	write_file_ticket(dir, 'SYM-402.md', 'opaque-402', 'SYM-402', 'In Review', 'blocked',
-		'Blocked')!
+	completed_path := write_file_ticket(dir, 'SYM-401.md', 'opaque-401', 'SYM-401', 'In Progress',
+		'completed', 'Completed')!
+	write_file_ticket(dir, 'SYM-402.md', 'opaque-402', 'SYM-402', 'In Review', 'blocked', 'Blocked')!
 	content := os.read_file(completed_path)!
 	os.write_file(completed_path, content.replace('completed_at: ""',
 		'completed_at: "2026-07-23T01:00:00Z"'))!
